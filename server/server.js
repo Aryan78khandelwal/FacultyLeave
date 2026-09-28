@@ -30,6 +30,10 @@ const User = require('./models/User');
 
 const app = express();
 
+// Trust first proxy (required for Railway, Render, Heroku, etc.)
+// Ensures express-rate-limit reads the real client IP from X-Forwarded-For
+app.set('trust proxy', 1);
+
 // Connect to Database
 connectDB().then(() => {
   // Seed initial Admin if database is empty

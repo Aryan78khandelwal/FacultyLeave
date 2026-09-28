@@ -19,6 +19,16 @@ const initTransporter = async () => {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
       },
+      connectionTimeout: 10000, // 10s – fail fast if cloud provider blocks SMTP
+      greetingTimeout: 10000,
+    });
+
+    // Verify SMTP connectivity at startup; log a warning if the host blocks SMTP
+    transporter.verify().then(() => {
+      console.log('SMTP connection verified successfully.');
+    }).catch((err) => {
+      console.warn('⚠  SMTP connection failed:', err.message);
+      console.warn('   Emails will be skipped. If deployed on Railway/Render, use an HTTP email API (Resend, SendGrid).');
     });
   } else {
     console.log('SMTP user/pass not configured. Initializing Ethereal email fallback account...');
