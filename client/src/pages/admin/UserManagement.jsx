@@ -103,7 +103,7 @@ const UserManagement = () => {
         department: formData.role === 'Admin' ? null : formData.department || null,
         password: formData.password || undefined,
         leaveBalance: {
-          casual: parseInt(formData.casual),
+          casual: parseFloat(formData.casual),
           restricted: parseInt(formData.restricted),
           earned: parseInt(formData.earned),
           vacation: parseInt(formData.vacation),
@@ -167,7 +167,7 @@ const UserManagement = () => {
         designation: formData.designation,
         department: formData.role === 'Admin' ? null : formData.department || null,
         leaveBalance: {
-          casual: parseInt(formData.casual),
+          casual: parseFloat(formData.casual),
           restricted: parseInt(formData.restricted),
           earned: parseInt(formData.earned),
           vacation: parseInt(formData.vacation),
@@ -575,6 +575,7 @@ const UserManagement = () => {
                       <input
                         type="number"
                         min="0"
+                        step="0.5"
                         className="form-input text-sm"
                         value={formData.casual}
                         onChange={(e) => setFormData({ ...formData, casual: e.target.value })}

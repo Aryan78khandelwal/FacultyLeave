@@ -118,7 +118,7 @@ const createUser = async (req, res, next) => {
     // If custom leave balances are supplied
     if (leaveBalance) {
       userData.leaveBalance = {
-        casual: leaveBalance.casual !== undefined ? parseInt(leaveBalance.casual) : 12,
+        casual: leaveBalance.casual !== undefined ? parseFloat(leaveBalance.casual) : 12,
         restricted: leaveBalance.restricted !== undefined ? parseInt(leaveBalance.restricted) : 10,
         earned: leaveBalance.earned !== undefined ? parseInt(leaveBalance.earned) : 15,
         vacation: role === 'HOD' ? 0 : (leaveBalance.vacation !== undefined ? parseInt(leaveBalance.vacation) : 11),
@@ -226,7 +226,7 @@ const updateUser = async (req, res, next) => {
 
     if (leaveBalance) {
       user.leaveBalance = {
-        casual: leaveBalance.casual !== undefined ? parseInt(leaveBalance.casual) : user.leaveBalance.casual,
+        casual: leaveBalance.casual !== undefined ? parseFloat(leaveBalance.casual) : user.leaveBalance.casual,
         restricted: leaveBalance.restricted !== undefined ? parseInt(leaveBalance.restricted) : user.leaveBalance.restricted,
         earned: leaveBalance.earned !== undefined ? parseInt(leaveBalance.earned) : user.leaveBalance.earned,
         vacation: (role || user.role) === 'HOD' ? 0 : (leaveBalance.vacation !== undefined ? parseInt(leaveBalance.vacation) : user.leaveBalance.vacation),
