@@ -5,7 +5,7 @@ import { Settings, Save, ShieldAlert, RotateCcw } from 'lucide-react';
 const AdminSettings = () => {
   const [policies, setPolicies] = useState({
     casualDays: 12,
-    sickDays: 10,
+    restrictedDays: 10,
     earnedDays: 15,
     carryForward: false,
     notificationsEnabled: true,
@@ -25,7 +25,7 @@ const AdminSettings = () => {
   const handleReset = () => {
     setPolicies({
       casualDays: 12,
-      sickDays: 10,
+      restrictedDays: 10,
       earnedDays: 15,
       carryForward: false,
       notificationsEnabled: true,
@@ -63,13 +63,13 @@ const AdminSettings = () => {
             </div>
             
             <div className="form-group">
-              <label className="form-label">Sick Leaves</label>
+              <label className="form-label">Restricted Leaves</label>
               <input
                 type="number"
                 min="0"
                 className="form-input"
-                value={policies.sickDays}
-                onChange={(e) => setPolicies({ ...policies, sickDays: parseInt(e.target.value) || 0 })}
+                value={policies.restrictedDays}
+                onChange={(e) => setPolicies({ ...policies, restrictedDays: parseInt(e.target.value) || 0 })}
                 disabled={loading}
               />
             </div>

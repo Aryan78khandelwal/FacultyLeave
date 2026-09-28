@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const Department = require('../models/Department');
+const LeaveRequest = require('../models/LeaveRequest');
 const { sendAccountCreatedEmail } = require('../services/emailService');
 
 // Generate random password helper
@@ -92,9 +93,12 @@ const createUser = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Email is already registered' });
     }
 
-    const empIdExists = await User.findOne({ employeeId });
+    const empIdExists = await User.findOne({
+      employeeId,
+      department: role === 'Admin' ? null : (department || null),
+    });
     if (empIdExists) {
-      return res.status(400).json({ success: false, message: 'Employee ID is already registered' });
+      return res.status(400).json({ success: false, message: 'Employee ID is already registered in this department' });
     }
 
     // Generate or use custom password
@@ -115,9 +119,37 @@ const createUser = async (req, res, next) => {
     if (leaveBalance) {
       userData.leaveBalance = {
         casual: leaveBalance.casual !== undefined ? parseInt(leaveBalance.casual) : 12,
-        sick: leaveBalance.sick !== undefined ? parseInt(leaveBalance.sick) : 10,
+        restricted: leaveBalance.restricted !== undefined ? parseInt(leaveBalance.restricted) : 10,
         earned: leaveBalance.earned !== undefined ? parseInt(leaveBalance.earned) : 15,
+        vacation: role === 'HOD' ? 0 : (leaveBalance.vacation !== undefined ? parseInt(leaveBalance.vacation) : 11),
       };
+    }
+
+    // Apply role-based leave-type restrictions.
+    // Instructor and SDA cannot have OOD or Vacation leaves — enforce this server-side
+    // regardless of what the frontend sends, so the policy is always consistent.
+    const rolesWithoutOodAndVacation = ['Instructor', 'SDA'];
+    const isRestrictedRole = rolesWithoutOodAndVacation.includes(role);
+
+    if (req.body.earnedLeaveEnabled !== undefined) {
+      userData.earnedLeaveEnabled = Boolean(req.body.earnedLeaveEnabled);
+    }
+    if (req.body.restrictedLeaveEnabled !== undefined) {
+      userData.restrictedLeaveEnabled = Boolean(req.body.restrictedLeaveEnabled);
+    }
+
+    // Vacation: explicitly disabled for Instructor/SDA regardless of request body
+    if (isRestrictedRole) {
+      userData.vacationLeaveEnabled = false;
+    } else if (req.body.vacationLeaveEnabled !== undefined) {
+      userData.vacationLeaveEnabled = Boolean(req.body.vacationLeaveEnabled);
+    }
+
+    // OOD: explicitly disabled for Instructor/SDA regardless of request body
+    if (isRestrictedRole) {
+      userData.oodLeaveEnabled = false;
+    } else if (req.body.oodLeaveEnabled !== undefined) {
+      userData.oodLeaveEnabled = Boolean(req.body.oodLeaveEnabled);
     }
 
     const user = await User.create(userData);
@@ -151,7 +183,7 @@ const createUser = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      message: `User created successfully and password emailed. Default password is ${rawPassword}`,
+      message: 'User created successfully. Login credentials have been emailed to the user.',
       user,
     });
   } catch (error) {
@@ -172,8 +204,11 @@ const updateUser = async (req, res, next) => {
     }
 
     // If HOD updates leaveBalance, only HOD of the department or Admin can update it
-    if (req.user.role === 'HOD' && user.department.toString() !== req.user.department._id.toString()) {
-      return res.status(403).json({ success: false, message: 'Not authorized to modify details of faculty outside your department' });
+    // Also guard against users with no department (null check prevents TypeError crash)
+    if (req.user.role === 'HOD') {
+      if (!user.department || user.department.toString() !== req.user.department._id.toString()) {
+        return res.status(403).json({ success: false, message: 'Not authorized to modify details of faculty outside your department' });
+      }
     }
 
     const previousRole = user.role;
@@ -192,9 +227,23 @@ const updateUser = async (req, res, next) => {
     if (leaveBalance) {
       user.leaveBalance = {
         casual: leaveBalance.casual !== undefined ? parseInt(leaveBalance.casual) : user.leaveBalance.casual,
-        sick: leaveBalance.sick !== undefined ? parseInt(leaveBalance.sick) : user.leaveBalance.sick,
+        restricted: leaveBalance.restricted !== undefined ? parseInt(leaveBalance.restricted) : user.leaveBalance.restricted,
         earned: leaveBalance.earned !== undefined ? parseInt(leaveBalance.earned) : user.leaveBalance.earned,
+        vacation: (role || user.role) === 'HOD' ? 0 : (leaveBalance.vacation !== undefined ? parseInt(leaveBalance.vacation) : user.leaveBalance.vacation),
       };
+    }
+
+    if (req.body.earnedLeaveEnabled !== undefined) {
+      user.earnedLeaveEnabled = Boolean(req.body.earnedLeaveEnabled);
+    }
+    if (req.body.restrictedLeaveEnabled !== undefined) {
+      user.restrictedLeaveEnabled = Boolean(req.body.restrictedLeaveEnabled);
+    }
+    if (req.body.vacationLeaveEnabled !== undefined) {
+      user.vacationLeaveEnabled = Boolean(req.body.vacationLeaveEnabled);
+    }
+    if (req.body.oodLeaveEnabled !== undefined) {
+      user.oodLeaveEnabled = Boolean(req.body.oodLeaveEnabled);
     }
 
     const updatedUser = await user.save();
@@ -268,8 +317,16 @@ const deleteUser = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
+    if (user._id.toString() === req.user._id.toString()) {
+      return res.status(400).json({ success: false, message: 'You cannot delete your own account' });
+    }
+
+
     const deptId = user.department;
 
+    // Note: We intentionally do NOT delete associated leave requests. 
+    // Leave history must be retained for record-keeping and audit purposes.
+    // The frontend UI safely handles null facultyId references via optional chaining.
     await User.findByIdAndDelete(req.params.id);
 
     // Remove user references in Department
@@ -284,7 +341,7 @@ const deleteUser = async (req, res, next) => {
       }
     }
 
-    res.status(200).json({ success: true, message: 'User deleted successfully' });
+    res.status(200).json({ success: true, message: 'User and all associated leave records deleted successfully' });
   } catch (error) {
     next(error);
   }

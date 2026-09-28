@@ -66,13 +66,17 @@ const HODAnalytics = () => {
   });
 
   // Pre-process Leave Type Data
-  const typeColors = { casual: '#3b82f6', sick: '#ef4444', earned: '#10b981' };
-  const typeData = (analyticsData?.typeStats || []).map((item) => ({
-    name: item._id.toUpperCase(),
-    value: item.totalDays,
-    count: item.count,
-    color: typeColors[item._id] || '#cbd5e1',
-  }));
+  const typeColors = { casual: '#3b82f6', restricted: '#ef4444', earned: '#10b981' };
+  const typeData = (analyticsData?.typeStats || []).map((item) => {
+    const rawType = item._id ? item._id.toLowerCase() : '';
+    const label = rawType === 'restricted' ? 'RESTRICTED' : rawType.toUpperCase();
+    return {
+      name: label,
+      value: item.totalDays,
+      count: item.count,
+      color: typeColors[rawType] || '#cbd5e1',
+    };
+  });
 
   // Pre-process Status Data
   const statusColors = { approved: '#10b981', rejected: '#ef4444', pending: '#f59e0b' };
@@ -89,7 +93,7 @@ const HODAnalytics = () => {
     return {
       name: fac.name.split(' ')[0], // short name
       Casual: fac.leaveBalance?.casual || 0,
-      Sick: fac.leaveBalance?.sick || 0,
+      Restricted: fac.leaveBalance?.restricted || 0,
       Earned: fac.leaveBalance?.earned || 0,
     };
   });
@@ -176,7 +180,7 @@ const HODAnalytics = () => {
                         <span className="font-medium text-slate-600 dark:text-slate-350">{item.name}</span>
                       </div>
                       <span className="font-bold text-slate-800 dark:text-white">
-                        {item.value} days ({item.count} apps)
+                        {item.value} days
                       </span>
                     </div>
                   ))}
@@ -257,7 +261,7 @@ const HODAnalytics = () => {
                   <Tooltip />
                   <Legend wrapperStyle={{ fontSize: '10px', marginTop: '10px' }} />
                   <Bar dataKey="Casual" fill="#3b82f6" stackId="a" />
-                  <Bar dataKey="Sick" fill="#ef4444" stackId="a" />
+                  <Bar dataKey="Restricted" fill="#ef4444" stackId="a" />
                   <Bar dataKey="Earned" fill="#10b981" stackId="a" />
                 </BarChart>
               </ResponsiveContainer>

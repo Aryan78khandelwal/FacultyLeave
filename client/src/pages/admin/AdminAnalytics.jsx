@@ -66,13 +66,17 @@ const AdminAnalytics = () => {
   });
 
   // Pre-process Leave Type Data
-  const typeColors = { casual: '#3b82f6', sick: '#ef4444', earned: '#10b981' };
-  const typeData = (analyticsData?.typeStats || []).map((item) => ({
-    name: item._id.toUpperCase(),
-    value: item.totalDays,
-    count: item.count,
-    color: typeColors[item._id] || '#cbd5e1',
-  }));
+  const typeColors = { casual: '#3b82f6', restricted: '#ef4444', earned: '#10b981' };
+  const typeData = (analyticsData?.typeStats || []).map((item) => {
+    const rawType = item._id ? item._id.toLowerCase() : '';
+    const label = rawType === 'restricted' ? 'RESTRICTED' : rawType.toUpperCase();
+    return {
+      name: label,
+      value: item.totalDays,
+      count: item.count,
+      color: typeColors[rawType] || '#cbd5e1',
+    };
+  });
 
   // Pre-process Status Data
   const statusColors = { approved: '#10b981', rejected: '#ef4444', pending: '#f59e0b' };
@@ -119,7 +123,6 @@ const AdminAnalytics = () => {
                   <Tooltip />
                   <Legend wrapperStyle={{ fontSize: '11px', marginTop: '10px' }} />
                   <Bar dataKey="days" fill="#3b82f6" name="Total Days Taken" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="applications" fill="#60a5fa" name="Applications Count" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -198,7 +201,7 @@ const AdminAnalytics = () => {
                         <span className="font-medium text-slate-600 dark:text-slate-350">{item.name}</span>
                       </div>
                       <span className="font-bold text-slate-800 dark:text-white">
-                        {item.value} days ({item.count} apps)
+                        {item.value} days
                       </span>
                     </div>
                   ))}

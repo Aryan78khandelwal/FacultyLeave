@@ -10,11 +10,16 @@ const FacultyManagement = () => {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // Edit balance modal states
   const [editingFaculty, setEditingFaculty] = useState(null);
   const [casual, setCasual] = useState(12);
-  const [sick, setSick] = useState(10);
+  const [restricted, setRestricted] = useState(10);
   const [earned, setEarned] = useState(15);
+  const [vacation, setVacation] = useState(11);
+  const [ood, setOod] = useState(10);
+  const [restrictedLeaveEnabled, setRestrictedLeaveEnabled] = useState(true);
+  const [earnedLeaveEnabled, setEarnedLeaveEnabled] = useState(true);
+  const [vacationLeaveEnabled, setVacationLeaveEnabled] = useState(true);
+  const [oodLeaveEnabled, setOodLeaveEnabled] = useState(true);
   const [updating, setUpdating] = useState(false);
 
   const fetchFaculty = async () => {
@@ -39,9 +44,15 @@ const FacultyManagement = () => {
 
   const handleEditClick = (fac) => {
     setEditingFaculty(fac);
-    setCasual(fac.leaveBalance?.casual || 0);
-    setSick(fac.leaveBalance?.sick || 0);
-    setEarned(fac.leaveBalance?.earned || 0);
+    setCasual(fac.leaveBalance?.casual !== undefined ? fac.leaveBalance.casual : 12);
+    setRestricted(fac.leaveBalance?.restricted !== undefined ? fac.leaveBalance.restricted : 10);
+    setEarned(fac.leaveBalance?.earned !== undefined ? fac.leaveBalance.earned : 15);
+    setVacation(fac.leaveBalance?.vacation !== undefined ? fac.leaveBalance.vacation : 11);
+    setOod(fac.leaveBalance?.ood !== undefined ? fac.leaveBalance.ood : 10);
+    setRestrictedLeaveEnabled(fac.restrictedLeaveEnabled !== false);
+    setEarnedLeaveEnabled(fac.earnedLeaveEnabled !== false);
+    setVacationLeaveEnabled(fac.vacationLeaveEnabled !== false);
+    setOodLeaveEnabled(fac.oodLeaveEnabled !== false);
   };
 
   const handleUpdateBalances = async (e) => {
@@ -51,9 +62,15 @@ const FacultyManagement = () => {
       const response = await api.put(`/users/${editingFaculty._id}`, {
         leaveBalance: {
           casual: parseInt(casual),
-          sick: parseInt(sick),
+          restricted: parseInt(restricted),
           earned: parseInt(earned),
+          vacation: parseInt(vacation),
+          ood: parseInt(ood),
         },
+        restrictedLeaveEnabled,
+        earnedLeaveEnabled,
+        vacationLeaveEnabled,
+        oodLeaveEnabled,
       });
 
       if (response.data.success) {
@@ -129,8 +146,10 @@ const FacultyManagement = () => {
                 <th className="table-th">Faculty Profile</th>
                 <th className="table-th">Role</th>
                 <th className="table-th text-center">Casual Balance</th>
-                <th className="table-th text-center">Sick Balance</th>
+                <th className="table-th text-center">Restricted Balance</th>
                 <th className="table-th text-center">Earned Balance</th>
+                <th className="table-th text-center">Vacation Balance</th>
+                <th className="table-th text-center">OOD Balance</th>
                 <th className="table-th text-right">Actions</th>
               </tr>
             </thead>
@@ -156,13 +175,23 @@ const FacultyManagement = () => {
                   </td>
                   <td className="table-td text-xs font-semibold uppercase">{fac.role}</td>
                   <td className="table-td text-center font-bold text-slate-700 dark:text-slate-300">
-                    {fac.leaveBalance?.casual || 0} days
+                    {fac.leaveBalance?.casual !== undefined ? fac.leaveBalance.casual : 12} days
                   </td>
                   <td className="table-td text-center font-bold text-slate-700 dark:text-slate-300">
-                    {fac.leaveBalance?.sick || 0} days
+                    {fac.restrictedLeaveEnabled !== false ? `${fac.leaveBalance?.restricted !== undefined ? fac.leaveBalance.restricted : 10} days` : <span className="text-red-500 font-bold text-xs">Disabled</span>}
                   </td>
                   <td className="table-td text-center font-bold text-slate-700 dark:text-slate-300">
-                    {fac.leaveBalance?.earned || 0} days
+                    {fac.earnedLeaveEnabled !== false ? `${fac.leaveBalance?.earned !== undefined ? fac.leaveBalance.earned : 15} days` : <span className="text-red-500 font-bold text-xs">Disabled</span>}
+                  </td>
+                  <td className="table-td text-center font-bold text-slate-700 dark:text-slate-300">
+                    {(fac.vacationLeaveEnabled === false || ['Instructor', 'SDA'].includes(fac.role))
+                      ? <span className="text-red-500 font-bold text-xs">Disabled</span>
+                      : `${fac.role === 'HOD' ? '0' : (fac.leaveBalance?.vacation !== undefined ? fac.leaveBalance.vacation : 11)} days`}
+                  </td>
+                  <td className="table-td text-center font-bold text-slate-700 dark:text-slate-300">
+                    {(fac.oodLeaveEnabled === false || ['Instructor', 'SDA'].includes(fac.role))
+                      ? <span className="text-red-500 font-bold text-xs">Disabled</span>
+                      : `${fac.leaveBalance?.ood !== undefined ? fac.leaveBalance.ood : 10} days`}
                   </td>
                   <td className="table-td text-right">
                     {/* HOD can update leave balances of other users, but not block themselves from the UI */}
@@ -218,29 +247,109 @@ const FacultyManagement = () => {
                 />
               </div>
 
-              {/* Sick Leave input */}
+              {/* Restricted Leave input */}
               <div className="form-group">
-                <label className="form-label">Sick Leave Balance</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="form-label mb-0">Restricted Leave Balance</label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={restrictedLeaveEnabled}
+                      onChange={(e) => setRestrictedLeaveEnabled(e.target.checked)}
+                      className="rounded border-slate-300 text-primary-600 focus:ring-primary-500 h-3.5 w-3.5"
+                    />
+                    <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">Enabled</span>
+                  </label>
+                </div>
                 <input
                   type="number"
                   min="0"
-                  required
+                  required={restrictedLeaveEnabled}
+                  disabled={!restrictedLeaveEnabled}
                   className="form-input text-sm"
-                  value={sick}
-                  onChange={(e) => setSick(e.target.value)}
+                  value={restricted}
+                  onChange={(e) => setRestricted(e.target.value)}
                 />
               </div>
 
               {/* Earned Leave input */}
               <div className="form-group">
-                <label className="form-label">Earned Leave Balance</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="form-label mb-0">Earned Leave Balance</label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={earnedLeaveEnabled}
+                      onChange={(e) => setEarnedLeaveEnabled(e.target.checked)}
+                      className="rounded border-slate-300 text-primary-600 focus:ring-primary-500 h-3.5 w-3.5"
+                    />
+                    <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">Enabled</span>
+                  </label>
+                </div>
                 <input
                   type="number"
                   min="0"
-                  required
+                  required={earnedLeaveEnabled}
+                  disabled={!earnedLeaveEnabled}
                   className="form-input text-sm"
                   value={earned}
                   onChange={(e) => setEarned(e.target.value)}
+                />
+              </div>
+
+              {/* Vacation Leave input */}
+              <div className="form-group">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="form-label mb-0">Vacation Leave Balance</label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={vacationLeaveEnabled}
+                      onChange={(e) => setVacationLeaveEnabled(e.target.checked)}
+                      disabled={['Instructor', 'SDA'].includes(editingFaculty?.role)}
+                      className="rounded border-slate-300 text-primary-600 focus:ring-primary-500 h-3.5 w-3.5 disabled:cursor-not-allowed"
+                    />
+                    <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">
+                      {['Instructor', 'SDA'].includes(editingFaculty?.role) ? 'N/A for this role' : 'Enabled'}
+                    </span>
+                  </label>
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  required={vacationLeaveEnabled}
+                  disabled={!vacationLeaveEnabled || ['Instructor', 'SDA'].includes(editingFaculty?.role)}
+                  className="form-input text-sm"
+                  value={vacation}
+                  onChange={(e) => setVacation(e.target.value)}
+                />
+              </div>
+
+              {/* OOD Leave input */}
+              <div className="form-group">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="form-label mb-0">Official Duty (OOD) Balance</label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={oodLeaveEnabled}
+                      onChange={(e) => setOodLeaveEnabled(e.target.checked)}
+                      disabled={['Instructor', 'SDA'].includes(editingFaculty?.role)}
+                      className="rounded border-slate-300 text-primary-600 focus:ring-primary-500 h-3.5 w-3.5 disabled:cursor-not-allowed"
+                    />
+                    <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">
+                      {['Instructor', 'SDA'].includes(editingFaculty?.role) ? 'N/A for this role' : 'Enabled'}
+                    </span>
+                  </label>
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  required={oodLeaveEnabled}
+                  disabled={!oodLeaveEnabled || ['Instructor', 'SDA'].includes(editingFaculty?.role)}
+                  className="form-input text-sm"
+                  value={ood}
+                  onChange={(e) => setOod(e.target.value)}
                 />
               </div>
 

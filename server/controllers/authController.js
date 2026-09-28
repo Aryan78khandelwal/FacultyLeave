@@ -2,10 +2,11 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { sendResetPasswordEmail } = require('../services/emailService');
+const { addToBlocklist } = require('../utils/tokenBlocklist');
 
 // Generate JWT token helper
 const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET || 'super_secret_faculty_leave_management_jwt_key_2026', {
+  return jwt.sign({ id }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   });
 };
@@ -141,8 +142,27 @@ const resetPassword = async (req, res, next) => {
   }
 };
 
+// @desc    Logout — revoke current JWT in the server-side blocklist
+// @route   POST /api/auth/logout
+// @access  Private
+const logoutUser = (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (token) {
+      const decoded = jwt.decode(token);
+      // decoded.exp is seconds; convert to ms for Date.now() comparison
+      const expMs = decoded?.exp ? decoded.exp * 1000 : Date.now() + 7 * 24 * 60 * 60 * 1000;
+      addToBlocklist(token, expMs);
+    }
+    res.status(200).json({ success: true, message: 'Logged out successfully' });
+  } catch (error) {
+    res.status(200).json({ success: true, message: 'Logged out' });
+  }
+};
+
 module.exports = {
   loginUser,
+  logoutUser,
   getCurrentUser,
   forgotPassword,
   resetPassword,

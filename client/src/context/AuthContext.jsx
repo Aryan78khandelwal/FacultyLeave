@@ -60,11 +60,16 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Logout handler
-  const logout = () => {
-    localStorage.removeItem('token');
-    setToken(null);
-    setUser(null);
+  // Logout handler — revokes the JWT server-side, then clears local state
+  const logout = async () => {
+    try {
+      // Fire-and-forget: revoke token in server blocklist even if the call fails
+      await api.post('/auth/logout').catch(() => {});
+    } finally {
+      localStorage.removeItem('token');
+      setToken(null);
+      setUser(null);
+    }
   };
 
   // Refresh user data (useful after leave approvals or balance changes)
@@ -103,7 +108,7 @@ export const AuthProvider = ({ children }) => {
     user,
     token,
     loading,
-    isAuthenticated: !!token && !!user,
+    isAuthenticated: !!token,
     login,
     logout,
     refreshUser,

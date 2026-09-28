@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import api from '../../services/api';
+import api, { getFileUrl } from '../../services/api';
 import { toast } from 'react-toastify';
 import { Check, X, FileText, Download, Calendar, Users, FileCheck, Eye } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -10,55 +10,74 @@ const HODDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ pending: 0, deptSize: 0, activeToday: 0 });
 
+  // Pagination state (IMP-04)
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const PAGE_SIZE = 20;
+
   // Modal states for rejection
   const [rejectingRequest, setRejectingRequest] = useState(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (currentPage = 1, append = false) => {
     try {
-      // 1. Fetch pending requests
-      const response = await api.get('/leaves?status=pending');
-      if (response.data.success) {
-        setPendingRequests(response.data.leaves);
+      // Batch: fetch paginated actionable leaves and approved-today count in parallel.
+      const batchedStatusParam = 'pending,certificate_submitted,temporarily_approved';
+
+      const requests = [
+        api.get(`/leaves?status=${batchedStatusParam}&page=${currentPage}&limit=${PAGE_SIZE}`),
+        api.get(`/leaves?status=approved&activeToday=true&limit=all`),
+      ];
+
+      if (user?.department) {
+        requests.push(api.get(`/departments/${user.department._id}`));
       }
 
-      // 2. Fetch department details for size
-      if (user?.department) {
-        const deptResponse = await api.get(`/departments/${user.department._id}`);
-        if (deptResponse.data.success) {
-          const dept = deptResponse.data.department;
-          
-          // Check how many are active on leave today
-          const today = new Date().toISOString().split('T')[0];
-          const approvedLeavesResponse = await api.get('/leaves?status=approved');
-          let activeToday = 0;
-          if (approvedLeavesResponse.data.success) {
-            approvedLeavesResponse.data.leaves.forEach((leave) => {
-              const start = new Date(leave.startDate).toISOString().split('T')[0];
-              const end = new Date(leave.endDate).toISOString().split('T')[0];
-              if (today >= start && today <= end) {
-                activeToday += 1;
-              }
-            });
-          }
+      const [leavesRes, activeTodayRes, deptRes] = await Promise.all(requests);
 
-          setStats({
-            pending: response.data.totalLeaves || 0,
-            deptSize: dept.facultyList?.length || 0,
-            activeToday,
-          });
+      if (leavesRes.data.success) {
+        const newLeaves = leavesRes.data.leaves;
+        setPendingRequests((prev) => (append ? [...prev, ...newLeaves] : newLeaves));
+
+        // Determine if there are more pages
+        const totalPages = leavesRes.data.totalPages || 1;
+        setHasMore(currentPage < totalPages);
+
+        // Count only truly "pending" and "certificate_submitted" for the stat badge
+        const totalPending = leavesRes.data.leaves.filter(
+          (l) => l.status === 'pending' || l.status === 'certificate_submitted'
+        ).length;
+        if (!append) {
+          setStats((prev) => ({ ...prev, pending: totalPending }));
         }
+      }
+
+      if (!append) {
+        const activeToday = activeTodayRes?.data?.success ? activeTodayRes.data.count : 0;
+        const deptSize = deptRes?.data?.success ? deptRes.data.department?.facultyList?.length || 0 : 0;
+        setStats((prev) => ({ ...prev, activeToday, deptSize }));
       }
     } catch (error) {
       console.error('Failed to load HOD dashboard data:', error);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
 
+  const handleLoadMore = async () => {
+    const nextPage = page + 1;
+    setPage(nextPage);
+    setLoadingMore(true);
+    await fetchDashboardData(nextPage, true);
+  };
+
+
   useEffect(() => {
-    fetchDashboardData();
+    setPage(1);
+    fetchDashboardData(1, false);
   }, [user]);
 
   const handleReview = async (id, status, reason = '') => {
@@ -78,7 +97,9 @@ const HODDashboard = () => {
         toast.success(`Leave request ${status} successfully`);
         setRejectingRequest(null);
         setRejectionReason('');
-        await fetchDashboardData();
+        // Reset to page 1 after any review action
+        setPage(1);
+        await fetchDashboardData(1, false);
       }
     } catch (error) {
       console.error(error);
@@ -187,52 +208,164 @@ const HODDashboard = () => {
                         {leave.facultyId?.designation} • ID: {leave.facultyId?.employeeId}
                       </div>
                     </td>
-                    <td className="table-td font-medium capitalize">{leave.leaveType}</td>
+                    <td className="table-td font-medium capitalize">
+                      {leave.leaveType}
+                      {leave.status === 'certificate_submitted' && (
+                         <div className="text-[9px] text-blue-500 font-bold uppercase mt-0.5">Cert Review</div>
+                      )}
+                      {leave.status === 'temporarily_approved' && (
+                         <div className="text-[9px] text-amber-500 font-bold uppercase mt-0.5">Awaiting Cert</div>
+                      )}
+                      {leave.isPaidLeave && (
+                         <div className="text-[9px] text-amber-600 font-bold uppercase mt-0.5 flex items-center gap-0.5">
+                           ⚠️ Paid Leave (CL Overdrawn)
+                         </div>
+                      )}
+                    </td>
                     <td className="table-td">
                       <div className="text-xs">
-                        {new Date(leave.startDate).toLocaleDateString()} - {new Date(leave.endDate).toLocaleDateString()}
+                        {new Date(leave.startDate).toLocaleDateString()}
+                        {(!leave.duration || leave.duration === 'FULL_DAY') && (
+                          <> – {new Date(leave.endDate).toLocaleDateString()}</>
+                        )}
                       </div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">({leave.totalDays} day(s))</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">
+                        {leave.duration === 'HALF_DAY' ? (
+                          <span className="text-indigo-500 dark:text-indigo-400 font-semibold">
+                            Half Day
+                            {leave.halfDayType && (
+                              <> &mdash; {leave.halfDayType === 'FIRST_HALF' ? 'First Half' : 'Second Half'}</>
+                            )}
+                            {' '}&mdash; 0.5 day
+                          </span>
+                        ) : (
+                          <>({leave.totalDays} day(s))</>
+                        )}
+                      </div>
+                      {leave.calendarDays && leave.calendarDays > leave.totalDays && leave.duration !== 'HALF_DAY' && (
+                        <div 
+                          className="text-[10px] text-slate-400 mt-0.5 cursor-help underline decoration-dotted" 
+                          title={leave.excludedDates?.map(e => `${new Date(e.date).toLocaleDateString()} (${e.reason})`).join(' | ')}
+                        >
+                          ({leave.calendarDays - leave.totalDays} holiday(s) excluded)
+                        </div>
+                      )}
                     </td>
                     <td className="table-td max-w-xs truncate" title={leave.reason}>
                       {leave.reason}
                     </td>
                     <td className="table-td text-center">
-                      {leave.documents ? (
-                        <a
-                          href={`http://localhost:5000${leave.documents}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex p-1.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-slate-300 hover:text-primary-600 rounded-lg"
-                        >
-                          <Eye size={14} />
-                        </a>
-                      ) : (
-                        <span className="text-[10px] text-slate-400 italic">None</span>
-                      )}
+                      <div className="flex justify-center gap-1">
+                        {leave.documents && (
+                          <a
+                            href={getFileUrl(leave.documents)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex p-1.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-slate-300 hover:text-primary-600 rounded-lg"
+                            title="Initial Document"
+                          >
+                            <Eye size={14} />
+                          </a>
+                        )}
+                        {leave.certificateDocument && (
+                          <a
+                            href={getFileUrl(leave.certificateDocument)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex p-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:text-blue-700 rounded-lg"
+                            title="Uploaded Certificate"
+                          >
+                            <FileText size={14} />
+                          </a>
+                        )}
+                        {!leave.documents && !leave.certificateDocument && (
+                          <span className="text-[10px] text-slate-400 italic">None</span>
+                        )}
+                      </div>
                     </td>
                     <td className="table-td text-right">
                       <div className="flex justify-end gap-2">
-                        <button
-                          onClick={() => handleReview(leave._id, 'approved')}
-                          className="p-1.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-lg transition-colors"
-                          title="Approve Leave"
-                        >
-                          <Check size={16} />
-                        </button>
-                        <button
-                          onClick={() => setRejectingRequest(leave)}
-                          className="p-1.5 bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-950/40 text-red-650 dark:text-red-400 rounded-lg transition-colors"
-                          title="Reject Leave"
-                        >
-                          <X size={16} />
-                        </button>
+                        {leave.leaveType === 'ood' && leave.status === 'pending' ? (
+                           <>
+                             <button
+                               onClick={() => handleReview(leave._id, 'temporarily_approved')}
+                               disabled={submittingReview}
+                               className="p-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 rounded-lg transition-colors text-[10px] font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                               title="Temporarily Approve"
+                             >
+                               Temp Approve
+                             </button>
+                             <button
+                               onClick={() => setRejectingRequest(leave)}
+                               disabled={submittingReview}
+                               className="p-1.5 bg-red-50 hover:bg-red-100 dark:bg-red-950/20 text-red-650 dark:text-red-400 rounded-lg transition-colors text-[10px] font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                               title="Reject Leave"
+                             >
+                               Reject
+                             </button>
+                           </>
+                         ) : leave.leaveType === 'ood' && leave.status === 'certificate_submitted' ? (
+                           <>
+                             <button
+                               onClick={() => handleReview(leave._id, 'approved')}
+                               disabled={submittingReview}
+                               className="p-1.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 rounded-lg transition-colors text-[10px] font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                               title="Verify and Approve"
+                             >
+                               Verify & Approve
+                             </button>
+                             <button
+                               onClick={() => setRejectingRequest({ ...leave, isCertReject: true })}
+                               disabled={submittingReview}
+                               className="p-1.5 bg-red-50 hover:bg-red-100 dark:bg-red-950/20 text-red-650 dark:text-red-400 rounded-lg transition-colors text-[10px] font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                               title="Reject Certificate"
+                             >
+                               Reject Cert
+                             </button>
+                           </>
+                        ) : leave.status === 'temporarily_approved' ? (
+                           <span className="text-[10px] text-slate-400 font-medium italic pr-2">
+                             Awaiting Faculty
+                           </span>
+                        ) : (
+                           <>
+                             <button
+                               onClick={() => handleReview(leave._id, 'approved')}
+                               disabled={submittingReview}
+                               className="p-1.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                               title="Approve Leave"
+                             >
+                               <Check size={16} />
+                             </button>
+                             <button
+                               onClick={() => setRejectingRequest(leave)}
+                               disabled={submittingReview}
+                               className="p-1.5 bg-red-50 hover:bg-red-100 dark:bg-red-950/20 text-red-650 dark:text-red-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                               title="Reject Leave"
+                             >
+                               <X size={16} />
+                             </button>
+                           </>
+                        )}
                       </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Load More (IMP-04 pagination) */}
+        {hasMore && (
+          <div className="mt-4 text-center">
+            <button
+              onClick={handleLoadMore}
+              disabled={loadingMore}
+              className="btn-secondary py-1.5 px-6 text-sm disabled:opacity-50"
+            >
+              {loadingMore ? 'Loading...' : 'Load More'}
+            </button>
           </div>
         )}
       </div>
@@ -242,7 +375,7 @@ const HODDashboard = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 backdrop-blur-xs px-4">
           <div className="w-full max-w-md bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-slate-150 dark:border-gray-700 overflow-hidden animate-scaleIn">
             <div className="px-6 py-4 bg-red-600 text-white flex justify-between items-center">
-              <h3 className="font-bold">Reject Leave Application</h3>
+              <h3 className="font-bold">{rejectingRequest.isCertReject ? 'Reject Duty Certificate' : 'Reject Leave Application'}</h3>
               <button onClick={() => setRejectingRequest(null)} className="text-white hover:text-red-200">
                 <X size={18} />
               </button>
@@ -279,7 +412,7 @@ const HODDashboard = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleReview(rejectingRequest._id, 'rejected', rejectionReason)}
+                  onClick={() => handleReview(rejectingRequest._id, rejectingRequest.isCertReject ? 'certificate_rejected' : 'rejected', rejectionReason)}
                   className="btn-danger py-1.5"
                   disabled={submittingReview}
                 >

@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const he = require('he'); // HTML entity encoder for XSS-safe email templates
 
 let transporter;
 
@@ -124,7 +125,7 @@ const sendLeaveAppliedEmail = async (hodEmail, hodName, facultyName, leaveReques
         </tr>
         <tr>
           <td style="padding: 8px 0; font-weight: bold;">Reason:</td>
-          <td style="padding: 8px 0;">${leaveRequest.reason}</td>
+          <td style="padding: 8px 0;">${ he.escape(String(leaveRequest.reason || '')) }</td>
         </tr>
       </table>
       <p>Please log in to review and respond to this request.</p>
@@ -167,6 +168,36 @@ const sendLeaveApprovedEmail = async (facultyEmail, facultyName, leaveRequest, r
   });
 };
 
+// Leave Temporarily Approved (OOD) Template
+const sendLeaveTemporarilyApprovedEmail = async (facultyEmail, facultyName, leaveRequest, reviewerName) => {
+  const startDateStr = new Date(leaveRequest.startDate).toLocaleDateString();
+  const endDateStr = new Date(leaveRequest.endDate).toLocaleDateString();
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+      <h2 style="color: #f59e0b; text-align: center;">OOD Request Temporarily Approved</h2>
+      <p>Hello <strong>${facultyName}</strong>,</p>
+      <p>Your Official Duty (OOD) leave request has been <strong>temporarily approved</strong> by <strong>${reviewerName}</strong>.</p>
+      <div style="background-color: #fef3c7; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #fde68a;">
+        <p style="margin: 5px 0;"><strong>Leave Type:</strong> Official Duty (OOD)</p>
+        <p style="margin: 5px 0;"><strong>Duration:</strong> ${startDateStr} to ${endDateStr} (${leaveRequest.totalDays} Day(s))</p>
+        <p style="margin: 5px 0;"><strong>Status:</strong> Temporarily Approved</p>
+      </div>
+      <p><strong>Action Required:</strong> To finalize this approval, you must upload your duty certificate from the institution you visited.</p>
+      <p>Please log in to your dashboard and navigate to Leave History to upload the document.</p>
+      <div style="text-align: center; margin-top: 30px;">
+        <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/faculty/history" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">Upload Certificate Now</a>
+      </div>
+    </div>
+  `;
+
+  await sendEmail({
+    to: facultyEmail,
+    subject: 'Action Required: Upload Duty Certificate for OOD',
+    html,
+  });
+};
+
 // Leave Rejected Template
 const sendLeaveRejectedEmail = async (facultyEmail, facultyName, leaveRequest, reviewerName) => {
   const startDateStr = new Date(leaveRequest.startDate).toLocaleDateString();
@@ -181,7 +212,7 @@ const sendLeaveRejectedEmail = async (facultyEmail, facultyName, leaveRequest, r
         <p style="margin: 5px 0;"><strong>Leave Type:</strong> <span style="text-transform: capitalize;">${leaveRequest.leaveType}</span></p>
         <p style="margin: 5px 0;"><strong>Duration:</strong> ${startDateStr} to ${endDateStr} (${leaveRequest.totalDays} Day(s))</p>
         <p style="margin: 5px 0;"><strong>Status:</strong> Rejected</p>
-        <p style="margin: 5px 0; color: #dc2626;"><strong>Rejection Reason:</strong> ${leaveRequest.rejectionReason || 'No details provided.'}</p>
+        <p style="margin: 5px 0; color: #dc2626;"><strong>Rejection Reason:</strong> ${ he.escape(String(leaveRequest.rejectionReason || 'No details provided.')) }</p>
       </div>
       <p>If you have any questions, please contact your department HOD.</p>
     </div>
@@ -220,6 +251,7 @@ module.exports = {
   sendAccountCreatedEmail,
   sendLeaveAppliedEmail,
   sendLeaveApprovedEmail,
+  sendLeaveTemporarilyApprovedEmail,
   sendLeaveRejectedEmail,
   sendResetPasswordEmail,
 };

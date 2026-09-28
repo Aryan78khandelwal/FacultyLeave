@@ -30,7 +30,7 @@ const runDiagnostics = async () => {
         employeeId: 'EMP-ADMIN-001',
         designation: 'System Administrator',
         role: 'Admin',
-        leaveBalance: { casual: 12, sick: 10, earned: 15 }
+        leaveBalance: { casual: 12, restricted: 10, earned: 15 }
       });
       console.log('Created Admin user successfully!');
       console.log('Email: admin@college.edu');

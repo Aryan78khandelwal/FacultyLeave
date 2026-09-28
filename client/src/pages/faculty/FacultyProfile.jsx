@@ -27,7 +27,19 @@ const FacultyProfile = () => {
     }
 
     setLoading(true);
-    const profileData = { name, designation, avatar };
+    const profileData = { name, designation };
+    
+    if (avatar) {
+      try {
+        new URL(avatar);
+        profileData.avatar = avatar;
+      } catch (e) {
+        toast.error('Please enter a valid URL for the avatar');
+        setLoading(false);
+        return;
+      }
+    }
+
     if (password) {
       profileData.password = password;
     }

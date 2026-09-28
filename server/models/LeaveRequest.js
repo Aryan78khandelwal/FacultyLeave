@@ -9,7 +9,7 @@ const leaveRequestSchema = new mongoose.Schema(
     },
     leaveType: {
       type: String,
-      enum: ['casual', 'sick', 'earned'],
+      enum: ['casual', 'restricted', 'earned', 'vacation', 'ood'],
       required: true,
     },
     startDate: {
@@ -24,6 +24,17 @@ const leaveRequestSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
+    calendarDays: {
+      type: Number,
+      default: 0,
+    },
+    excludedDates: {
+      type: [{
+        date: Date,
+        reason: String
+      }],
+      default: [],
+    },
     reason: {
       type: String,
       required: [true, 'Please specify a reason for the leave'],
@@ -31,7 +42,7 @@ const leaveRequestSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['pending', 'approved', 'rejected'],
+      enum: ['pending', 'approved', 'rejected', 'temporarily_approved', 'certificate_submitted', 'certificate_rejected'],
       default: 'pending',
     },
     approvedBy: {
@@ -46,6 +57,24 @@ const leaveRequestSchema = new mongoose.Schema(
     documents: {
       type: String, // Storing filepath or URL
       default: '',
+    },
+    certificateDocument: {
+      type: String, // Storing OOD certificate path
+      default: '',
+    },
+    isPaidLeave: {
+      type: Boolean,
+      default: false,
+    },
+    duration: {
+      type: String,
+      enum: ['FULL_DAY', 'HALF_DAY'],
+      default: 'FULL_DAY',
+    },
+    halfDayType: {
+      type: String,
+      enum: ['FIRST_HALF', 'SECOND_HALF', null],
+      default: null,
     },
   },
   {

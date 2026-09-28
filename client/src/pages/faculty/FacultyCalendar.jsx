@@ -62,15 +62,23 @@ const FacultyCalendar = () => {
               </div>
               <div className="flex items-center gap-2.5">
                 <div className="w-4 h-4 rounded bg-blue-500 border border-blue-600" />
-                <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Casual Leave (Approved)</span>
+                <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Casual Leave — Full Day</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <div className="w-4 h-4 rounded border-2 border-dashed border-sky-400 bg-sky-200" />
+                <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Casual Leave — Half Day</span>
               </div>
               <div className="flex items-center gap-2.5">
                 <div className="w-4 h-4 rounded bg-red-500 border border-red-600" />
-                <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Sick Leave (Approved)</span>
+                <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Restricted Leave (Approved)</span>
               </div>
               <div className="flex items-center gap-2.5">
                 <div className="w-4 h-4 rounded bg-emerald-500 border border-emerald-600" />
-                <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Earned Leave (Approved)</span>
+                <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Earned Leave — Full Day</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <div className="w-4 h-4 rounded border-2 border-dashed border-teal-400 bg-teal-200" />
+                <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Earned Leave — Half Day</span>
               </div>
             </div>
           </div>
@@ -100,7 +108,19 @@ const FacultyCalendar = () => {
                 <div>
                   <span className="text-slate-400 block uppercase font-semibold text-[10px]">Type & Duration</span>
                   <span className="text-slate-700 dark:text-slate-300 font-semibold capitalize">
-                    {selectedEvent.extendedProps.leaveType} ({selectedEvent.extendedProps.totalDays} day(s))
+                    {selectedEvent.extendedProps.leaveType}
+                    {' — '}
+                    {selectedEvent.extendedProps.duration === 'HALF_DAY' ? (
+                      <span className="text-indigo-600 dark:text-indigo-400">
+                        Half Day
+                        {selectedEvent.extendedProps.halfDayType && (
+                          <span className="ml-1 text-[10px] font-bold uppercase">
+                            ({selectedEvent.extendedProps.halfDayType === 'FIRST_HALF' ? 'First Half' : 'Second Half'})
+                          </span>
+                        )}
+                      </span>
+                    ) : 'Full Day'}
+                    {' '}({selectedEvent.extendedProps.totalDays} day(s))
                   </span>
                 </div>
                 <div>
@@ -137,6 +157,8 @@ const FacultyCalendar = () => {
 
         {/* Main Calendar View */}
         <div className="lg:col-span-3 card">
+          {/* Half-day event dashed border style */}
+          <style>{`.half-day-event { border-style: dashed !important; border-width: 2px !important; opacity: 0.85; }`}</style>
           {loading ? (
             <div className="h-96 flex items-center justify-center">
               <div className="w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full animate-spin" />

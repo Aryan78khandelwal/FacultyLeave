@@ -6,6 +6,7 @@ const {
   reviewLeave,
   getLeaveAnalytics,
   getCalendarLeaves,
+  uploadCertificate,
 } = require('../controllers/leaveController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 const upload = require('../middleware/uploadMiddleware');
@@ -20,7 +21,7 @@ router.route('/')
   .get(protect, getLeaves)
   .post(
     protect,
-    authorize('Faculty', 'HOD'),
+    authorize('Faculty', 'HOD', 'Instructor', 'SDA'),
     upload.single('document'),
     // Parse JSON form fields if they are sent in multi-part form
     (req, res, next) => {
@@ -36,5 +37,8 @@ router.route('/:id')
 
 router.route('/:id/review')
   .put(protect, authorize('HOD', 'Admin'), reviewLeave);
+
+router.route('/:id/certificate')
+  .put(protect, authorize('Faculty', 'Instructor', 'SDA'), upload.single('document'), uploadCertificate);
 
 module.exports = router;

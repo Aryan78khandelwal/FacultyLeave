@@ -29,7 +29,7 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['Faculty', 'HOD', 'Admin'],
+      enum: ['Faculty', 'HOD', 'Admin', 'Instructor', 'SDA'],
       default: 'Faculty',
     },
     avatar: {
@@ -39,7 +39,6 @@ const userSchema = new mongoose.Schema(
     employeeId: {
       type: String,
       required: [true, 'Please provide an Employee ID'],
-      unique: true,
       trim: true,
     },
     designation: {
@@ -52,14 +51,38 @@ const userSchema = new mongoose.Schema(
         type: Number,
         default: 12, // Default annual casual leaves
       },
-      sick: {
+      restricted: {
         type: Number,
-        default: 10, // Default annual sick leaves
+        default: 10, // Default annual restricted leaves
       },
       earned: {
         type: Number,
         default: 15, // Default annual earned leaves
       },
+      vacation: {
+        type: Number,
+        default: 11, // Default annual vacation leaves
+      },
+      ood: {
+        type: Number,
+        default: 10, // Default annual Official Duty leaves
+      },
+    },
+    restrictedLeaveEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    earnedLeaveEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    vacationLeaveEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    oodLeaveEnabled: {
+      type: Boolean,
+      default: true,
     },
     resetPasswordToken: String,
     resetPasswordExpire: Date,
@@ -84,4 +107,13 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
 };
 
 const User = mongoose.model('User', userSchema);
+
+// Compound unique index: same employeeId is allowed across different departments
+// but cannot be duplicated within the same department.
+// sparse: true ensures Admin users (department: null) don't block each other.
+User.collection.createIndex(
+  { employeeId: 1, department: 1 },
+  { unique: true, sparse: true }
+).catch(() => {}); // silently ignore if already exists
+
 module.exports = User;

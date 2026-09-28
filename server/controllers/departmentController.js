@@ -7,8 +7,8 @@ const User = require('../models/User');
 const getDepartments = async (req, res, next) => {
   try {
     const departments = await Department.find()
-      .populate('hod', 'name email employeeId designation')
-      .populate('facultyList', 'name email employeeId designation role');
+      .populate('hod', 'name email employeeId designation avatar')
+      .populate('facultyList', 'name email employeeId designation role leaveBalance earnedLeaveEnabled avatar');
 
     res.status(200).json({ success: true, count: departments.length, departments });
   } catch (error) {
@@ -22,8 +22,8 @@ const getDepartments = async (req, res, next) => {
 const getDepartmentById = async (req, res, next) => {
   try {
     const department = await Department.findById(req.params.id)
-      .populate('hod', 'name email employeeId designation')
-      .populate('facultyList', 'name email employeeId designation role');
+      .populate('hod', 'name email employeeId designation avatar')
+      .populate('facultyList', 'name email employeeId designation role leaveBalance earnedLeaveEnabled avatar');
 
     if (!department) {
       return res.status(404).json({ success: false, message: 'Department not found' });
@@ -108,8 +108,8 @@ const updateDepartment = async (req, res, next) => {
     
     // Fetch and populate for final response
     const finalDept = await Department.findById(updatedDept._id)
-      .populate('hod', 'name email employeeId designation')
-      .populate('facultyList', 'name email employeeId designation role');
+      .populate('hod', 'name email employeeId designation avatar')
+      .populate('facultyList', 'name email employeeId designation role leaveBalance earnedLeaveEnabled avatar');
 
     res.status(200).json({ success: true, department: finalDept });
   } catch (error) {

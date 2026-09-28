@@ -80,46 +80,110 @@ const FacultyDashboard = () => {
         <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">
           My Leave Balances
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
           {/* Casual Leave */}
           <div className="card-metric border-l-4 border-l-primary-500">
-            <h4 className="text-sm font-medium text-slate-500 dark:text-slate-400">Casual Leave</h4>
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-medium text-slate-500 dark:text-slate-400">Casual Leave</h4>
+            </div>
             <div className="flex items-baseline gap-2 mt-2">
-              <span className="text-3xl font-bold text-slate-800 dark:text-white">
-                {user?.leaveBalance?.casual || 0}
+              <span className={`text-3xl font-bold ${user?.leaveBalance?.casual < 0 ? 'text-red-500' : 'text-slate-800 dark:text-white'}`}>
+                {user?.leaveBalance?.casual !== undefined ? user.leaveBalance.casual : 0}
               </span>
               <span className="text-xs text-slate-400">days available</span>
             </div>
-            <div className="mt-4 text-xs text-slate-400 bg-primary-50/50 dark:bg-primary-950/10 p-2 rounded">
-              Ideal for short personal emergencies
-            </div>
+            {user?.leaveBalance?.casual < 0 ? (
+              <div className="mt-4 text-xs font-semibold text-red-600 bg-red-50 dark:bg-red-900/20 p-2 rounded">
+                Overdrawn by {Math.abs(user.leaveBalance.casual)} days (Leave Without Pay)
+              </div>
+            ) : (
+              <div className="mt-4 text-xs text-slate-400 bg-primary-50/50 dark:bg-primary-900/10 p-2 rounded">
+                Standard casual leaves for personal matters
+              </div>
+            )}
           </div>
 
-          {/* Sick Leave */}
-          <div className="card-metric border-l-4 border-l-red-500">
-            <h4 className="text-sm font-medium text-slate-500 dark:text-slate-400">Sick Leave</h4>
+          {/* Restricted Leave */}
+          <div className={`card-metric border-l-4 ${user?.restrictedLeaveEnabled === false ? 'border-l-slate-400 opacity-70' : 'border-l-red-500'}`}>
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-medium text-slate-500 dark:text-slate-400">Restricted Leave</h4>
+              {user?.restrictedLeaveEnabled === false && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400">
+                  Disabled
+                </span>
+              )}
+            </div>
             <div className="flex items-baseline gap-2 mt-2">
               <span className="text-3xl font-bold text-slate-800 dark:text-white">
-                {user?.leaveBalance?.sick || 0}
+                {user?.restrictedLeaveEnabled === false ? 0 : (user?.leaveBalance?.restricted || 0)}
               </span>
               <span className="text-xs text-slate-400">days available</span>
             </div>
             <div className="mt-4 text-xs text-slate-400 bg-red-50/50 dark:bg-red-950/10 p-2 rounded">
-              Medical emergency or health concerns
+              {user?.restrictedLeaveEnabled === false ? 'Restricted leave disabled' : 'Medical emergency or health concerns'}
             </div>
           </div>
 
           {/* Earned Leave */}
-          <div className="card-metric border-l-4 border-l-emerald-500">
-            <h4 className="text-sm font-medium text-slate-500 dark:text-slate-400">Earned Leave</h4>
+          <div className={`card-metric border-l-4 ${user?.earnedLeaveEnabled === false ? 'border-l-slate-400 opacity-70' : 'border-l-emerald-500'}`}>
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-medium text-slate-500 dark:text-slate-400">Earned Leave</h4>
+              {user?.earnedLeaveEnabled === false && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400">
+                  Disabled
+                </span>
+              )}
+            </div>
             <div className="flex items-baseline gap-2 mt-2">
               <span className="text-3xl font-bold text-slate-800 dark:text-white">
-                {user?.leaveBalance?.earned || 0}
+                {user?.earnedLeaveEnabled === false ? 0 : (user?.leaveBalance?.earned || 0)}
               </span>
               <span className="text-xs text-slate-400">days available</span>
             </div>
-            <div className="mt-4 text-xs text-slate-400 bg-emerald-50/50 dark:bg-emerald-950/10 p-2 rounded">
-              Accumulated leaves for scheduled breaks
+            <div className="mt-4 text-xs text-slate-400 bg-slate-50/50 dark:bg-gray-800/50 p-2 rounded">
+              {user?.earnedLeaveEnabled === false ? 'Earned leave disabled for this account' : 'Accumulated leaves for scheduled breaks'}
+            </div>
+          </div>
+
+          {/* Official Duty Leave (OOD) */}
+          <div className={`card-metric border-l-4 ${user?.oodLeaveEnabled === false ? 'border-l-slate-400 opacity-70' : 'border-l-purple-500'}`}>
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-medium text-slate-500 dark:text-slate-400">Official Duty (OOD)</h4>
+              {user?.oodLeaveEnabled === false && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400">
+                  Disabled
+                </span>
+              )}
+            </div>
+            <div className="flex items-baseline gap-2 mt-2">
+              <span className="text-3xl font-bold text-slate-800 dark:text-white">
+                {user?.oodLeaveEnabled === false ? 0 : (user?.leaveBalance?.ood || 0)}
+              </span>
+              <span className="text-xs text-slate-400">days available</span>
+            </div>
+            <div className="mt-4 text-xs text-slate-400 bg-purple-50/50 dark:bg-purple-950/10 p-2 rounded">
+              {user?.oodLeaveEnabled === false ? 'OOD leave disabled' : 'Requires duty certificate verification'}
+            </div>
+          </div>
+
+          {/* Vacation Leave */}
+          <div className={`card-metric border-l-4 ${user?.vacationLeaveEnabled === false ? 'border-l-slate-400 opacity-70' : 'border-l-blue-500'}`}>
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-medium text-slate-500 dark:text-slate-400">Vacation Leave</h4>
+              {user?.vacationLeaveEnabled === false && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400">
+                  Disabled
+                </span>
+              )}
+            </div>
+            <div className="flex items-baseline gap-2 mt-2">
+              <span className="text-3xl font-bold text-slate-800 dark:text-white">
+                {user?.vacationLeaveEnabled === false || user?.role === 'HOD' ? 0 : (user?.leaveBalance?.vacation || 0)}
+              </span>
+              <span className="text-xs text-slate-400">days available</span>
+            </div>
+            <div className="mt-4 text-xs text-slate-400 bg-blue-50/50 dark:bg-blue-950/10 p-2 rounded">
+              {user?.vacationLeaveEnabled === false ? 'Vacation leave disabled' : 'Scheduled college breaks'}
             </div>
           </div>
         </div>

@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { isBlocked } = require('../utils/tokenBlocklist');
 
 const protect = async (req, res, next) => {
   let token;
@@ -9,8 +10,13 @@ const protect = async (req, res, next) => {
       // Get token from header
       token = req.headers.authorization.split(' ')[1];
 
+      // Reject immediately if the token has been explicitly revoked (logout / role change)
+      if (isBlocked(token)) {
+        return res.status(401).json({ success: false, message: 'Session has been invalidated. Please log in again.' });
+      }
+
       // Verify token
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'super_secret_faculty_leave_management_jwt_key_2026');
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
       // Get user from the token and attach to request
       req.user = await User.findById(decoded.id).select('-password').populate('department');

@@ -9,6 +9,12 @@ const rateLimit = require('express-rate-limit');
 // Load environment variables
 dotenv.config();
 
+// === Critical Environment Variable Checks ===
+if (!process.env.JWT_SECRET) {
+  console.error('FATAL ERROR: JWT_SECRET is not defined in environment variables. Server cannot start.');
+  process.exit(1);
+}
+
 const connectDB = require('./config/db');
 const errorHandler = require('./middleware/errorMiddleware');
 
@@ -17,6 +23,7 @@ const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const departmentRoutes = require('./routes/departmentRoutes');
 const leaveRoutes = require('./routes/leaveRoutes');
+const fileRoutes = require('./routes/fileRoutes');
 
 // Import models for seeding
 const User = require('./models/User');
@@ -30,9 +37,7 @@ connectDB().then(() => {
 });
 
 // Security HTTP headers
-app.use(helmet({
-  crossOriginResourcePolicy: false, // Essential for allowing frontend to load local upload images
-}));
+app.use(helmet());
 
 // CORS setup
 const corsOptions = {
@@ -43,14 +48,16 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
-// HTTP request logger
-app.use(morgan('dev'));
+// HTTP request logger (only active in development)
+if (process.env.NODE_ENV === 'development') {
+  app.use(morgan('dev'));
+}
 
 // Body parser
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Rate limiting (100 requests per 15 minutes per IP)
+// Rate limiting (general: 200 requests per 15 minutes per IP)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
@@ -58,14 +65,22 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// Serve uploads statically
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Stricter rate limit for auth endpoints (brute force / enumeration protection)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: 'Too many login attempts from this IP, please try again after 15 minutes',
+  skipSuccessfulRequests: true, // Only count failed attempts
+});
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/forgotpassword', authLimiter);
 
 // Mount API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/leaves', leaveRoutes);
+app.use('/api/files', fileRoutes); // Authenticated file serving (replaces public /uploads route)
 
 // Base route for health check
 app.get('/', (req, res) => {
@@ -90,7 +105,7 @@ async function seedAdmin() {
         role: 'Admin',
         leaveBalance: {
           casual: 12,
-          sick: 10,
+          restricted: 10,
           earned: 15,
         },
       });

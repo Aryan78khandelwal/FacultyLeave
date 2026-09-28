@@ -28,8 +28,14 @@ const UserManagement = () => {
     designation: '',
     department: '',
     casual: 12,
-    sick: 10,
+    restricted: 10,
     earned: 15,
+    vacation: 11,
+    ood: 10,
+    restrictedLeaveEnabled: true,
+    earnedLeaveEnabled: true,
+    vacationLeaveEnabled: true,
+    oodLeaveEnabled: true,
     password: '',
   });
 
@@ -98,9 +104,15 @@ const UserManagement = () => {
         password: formData.password || undefined,
         leaveBalance: {
           casual: parseInt(formData.casual),
-          sick: parseInt(formData.sick),
+          restricted: parseInt(formData.restricted),
           earned: parseInt(formData.earned),
+          vacation: parseInt(formData.vacation),
+          ood: parseInt(formData.ood),
         },
+        restrictedLeaveEnabled: formData.restrictedLeaveEnabled,
+        earnedLeaveEnabled: formData.earnedLeaveEnabled,
+        vacationLeaveEnabled: formData.vacationLeaveEnabled,
+        oodLeaveEnabled: formData.oodLeaveEnabled,
       });
 
       if (response.data.success) {
@@ -132,8 +144,14 @@ const UserManagement = () => {
       designation: userObj.designation || '',
       department: userObj.department?._id || userObj.department || '',
       casual: userObj.leaveBalance?.casual || 12,
-      sick: userObj.leaveBalance?.sick || 10,
-      earned: userObj.leaveBalance?.earned || 15,
+      restricted: userObj.leaveBalance?.restricted !== undefined ? userObj.leaveBalance.restricted : 10,
+      earned: userObj.leaveBalance?.earned !== undefined ? userObj.leaveBalance.earned : 15,
+      vacation: userObj.leaveBalance?.vacation !== undefined ? userObj.leaveBalance.vacation : 11,
+      ood: userObj.leaveBalance?.ood !== undefined ? userObj.leaveBalance.ood : 10,
+      restrictedLeaveEnabled: userObj.restrictedLeaveEnabled !== false,
+      earnedLeaveEnabled: userObj.earnedLeaveEnabled !== false,
+      vacationLeaveEnabled: userObj.vacationLeaveEnabled !== false,
+      oodLeaveEnabled: userObj.oodLeaveEnabled !== false,
     });
     setEditOpen(true);
   };
@@ -150,9 +168,15 @@ const UserManagement = () => {
         department: formData.role === 'Admin' ? null : formData.department || null,
         leaveBalance: {
           casual: parseInt(formData.casual),
-          sick: parseInt(formData.sick),
+          restricted: parseInt(formData.restricted),
           earned: parseInt(formData.earned),
+          vacation: parseInt(formData.vacation),
+          ood: parseInt(formData.ood),
         },
+        restrictedLeaveEnabled: formData.restrictedLeaveEnabled,
+        earnedLeaveEnabled: formData.earnedLeaveEnabled,
+        vacationLeaveEnabled: formData.vacationLeaveEnabled,
+        oodLeaveEnabled: formData.oodLeaveEnabled,
       });
 
       if (response.data.success) {
@@ -202,8 +226,14 @@ const UserManagement = () => {
       designation: '',
       department: '',
       casual: 12,
-      sick: 10,
+      restricted: 10,
       earned: 15,
+      vacation: 11,
+      ood: 10,
+      restrictedLeaveEnabled: true,
+      earnedLeaveEnabled: true,
+      vacationLeaveEnabled: true,
+      oodLeaveEnabled: true,
       password: '',
     });
   };
@@ -248,6 +278,8 @@ const UserManagement = () => {
             <option value="Admin">Admin</option>
             <option value="HOD">HOD</option>
             <option value="Faculty">Faculty</option>
+            <option value="Instructor">Instructor</option>
+            <option value="SDA">SDA</option>
           </select>
 
           <select
@@ -288,7 +320,7 @@ const UserManagement = () => {
                   <th className="table-th">User Profile</th>
                   <th className="table-th">Department</th>
                   <th className="table-th">Role</th>
-                  <th className="table-th text-center">Balances (C/S/E)</th>
+                  <th className="table-th text-center">Balances (C/R/E/V/O)</th>
                   <th className="table-th text-right">Actions</th>
                 </tr>
               </thead>
@@ -335,7 +367,7 @@ const UserManagement = () => {
                         <span className="text-slate-400 italic">-</span>
                       ) : (
                         <span className="text-slate-700 dark:text-slate-300">
-                          {item.leaveBalance?.casual || 0} / {item.leaveBalance?.sick || 0} / {item.leaveBalance?.earned || 0}
+                          {item.leaveBalance?.casual || 0} / {item.restrictedLeaveEnabled !== false ? (item.leaveBalance?.restricted || 0) : <span className="text-red-500 font-bold" title="Restricted Leave Disabled">Off</span>} / {item.earnedLeaveEnabled !== false ? (item.leaveBalance?.earned || 0) : <span className="text-red-500 font-bold" title="Earned Leave Disabled">Off</span>} / {item.vacationLeaveEnabled !== false ? (item.leaveBalance?.vacation || 0) : <span className="text-red-500 font-bold" title="Vacation Leave Disabled">Off</span>} / {item.oodLeaveEnabled !== false ? (item.leaveBalance?.ood || 0) : <span className="text-red-500 font-bold" title="OOD Leave Disabled">Off</span>}
                         </span>
                       )}
                     </td>
@@ -451,7 +483,7 @@ const UserManagement = () => {
                 <div className="form-group">
                   <label className="form-label">Password (Optional - Leave blank to auto-generate)</label>
                   <input
-                    type="text"
+                    type="password"
                     className="form-input text-sm"
                     placeholder="Custom password (at least 6 characters)"
                     value={formData.password}
@@ -471,6 +503,8 @@ const UserManagement = () => {
                     <option value="Faculty">Faculty Member</option>
                     <option value="HOD">Head of Department (HOD)</option>
                     <option value="Admin">Administrator</option>
+                    <option value="Instructor">Instructor</option>
+                    <option value="SDA">SDA</option>
                   </select>
                 </div>
 
@@ -494,11 +528,48 @@ const UserManagement = () => {
 
               {formData.role !== 'Admin' && (
                 <div className="pt-2 border-t border-slate-100 dark:border-gray-700">
-                  <h4 className="font-bold text-xs text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                    <Settings size={14} />
-                    <span>Initialize Annual Leave Balances</span>
-                  </h4>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="flex flex-wrap items-center justify-between mb-2 gap-2">
+                    <h4 className="font-semibold text-xs text-slate-700 dark:text-slate-300">Initial Annual Leave Balances</h4>
+                    <div className="flex items-center gap-3 text-xs">
+                      <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={formData.restrictedLeaveEnabled}
+                          onChange={(e) => setFormData({ ...formData, restrictedLeaveEnabled: e.target.checked })}
+                          className="rounded border-slate-300 text-primary-600 focus:ring-primary-500 h-3 w-3"
+                        />
+                        <span className="text-slate-600 dark:text-slate-400 font-medium">Restricted</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={formData.earnedLeaveEnabled}
+                          onChange={(e) => setFormData({ ...formData, earnedLeaveEnabled: e.target.checked })}
+                          className="rounded border-slate-300 text-primary-600 focus:ring-primary-500 h-3 w-3"
+                        />
+                        <span className="text-slate-600 dark:text-slate-400 font-medium">Earned</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={formData.vacationLeaveEnabled}
+                          onChange={(e) => setFormData({ ...formData, vacationLeaveEnabled: e.target.checked })}
+                          className="rounded border-slate-300 text-primary-600 focus:ring-primary-500 h-3 w-3"
+                        />
+                        <span className="text-slate-600 dark:text-slate-400 font-medium">Vacation</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={formData.oodLeaveEnabled}
+                          onChange={(e) => setFormData({ ...formData, oodLeaveEnabled: e.target.checked })}
+                          className="rounded border-slate-300 text-primary-600 focus:ring-primary-500 h-3 w-3"
+                        />
+                        <span className="text-slate-600 dark:text-slate-400 font-medium">OOD</span>
+                      </label>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
                     <div className="form-group">
                       <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400">Casual</label>
                       <input
@@ -510,23 +581,55 @@ const UserManagement = () => {
                       />
                     </div>
                     <div className="form-group">
-                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400">Sick</label>
+                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                        Restricted {formData.restrictedLeaveEnabled ? '' : '(Off)'}
+                      </label>
                       <input
                         type="number"
                         min="0"
                         className="form-input text-sm"
-                        value={formData.sick}
-                        onChange={(e) => setFormData({ ...formData, sick: e.target.value })}
+                        disabled={!formData.restrictedLeaveEnabled}
+                        value={formData.restricted}
+                        onChange={(e) => setFormData({ ...formData, restricted: e.target.value })}
                       />
                     </div>
                     <div className="form-group">
-                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400">Earned</label>
+                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                        Earned {formData.earnedLeaveEnabled ? '' : '(Off)'}
+                      </label>
                       <input
                         type="number"
                         min="0"
                         className="form-input text-sm"
+                        disabled={!formData.earnedLeaveEnabled}
                         value={formData.earned}
                         onChange={(e) => setFormData({ ...formData, earned: e.target.value })}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                        Vacation {formData.vacationLeaveEnabled ? '' : '(Off)'}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        className="form-input text-sm"
+                        disabled={!formData.vacationLeaveEnabled}
+                        value={formData.vacation}
+                        onChange={(e) => setFormData({ ...formData, vacation: e.target.value })}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                        OOD {formData.oodLeaveEnabled ? '' : '(Off)'}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        className="form-input text-sm"
+                        disabled={!formData.oodLeaveEnabled}
+                        value={formData.ood}
+                        onChange={(e) => setFormData({ ...formData, ood: e.target.value })}
                       />
                     </div>
                   </div>
@@ -560,7 +663,7 @@ const UserManagement = () => {
               </div>
               <h3 className="font-bold text-slate-800 dark:text-white">Delete User Account?</h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                Are you sure you want to permanently delete <strong>{selectedUser?.name}</strong>'s account? This will remove all their leave histories. This action is irreversible.
+                Are you sure you want to permanently delete <strong>{selectedUser?.name}</strong>'s account? This action is irreversible. Note: their leave history will be retained for record-keeping.
               </p>
               <div className="flex gap-3 pt-2">
                 <button
