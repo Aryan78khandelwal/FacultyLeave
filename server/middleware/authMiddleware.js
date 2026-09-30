@@ -25,6 +25,14 @@ const protect = async (req, res, next) => {
         return res.status(401).json({ success: false, message: 'Not authorized, user not found' });
       }
 
+      // Reject token if password was changed after the token was issued
+      if (req.user.passwordChangedAt) {
+        const changedAtSeconds = Math.floor(req.user.passwordChangedAt.getTime() / 1000);
+        if (decoded.iat < changedAtSeconds) {
+          return res.status(401).json({ success: false, message: 'Password was recently changed. Please log in again.' });
+        }
+      }
+
       next();
     } catch (error) {
       console.error(error);

@@ -28,14 +28,15 @@ const addToBlocklist = (token, expMs) => {
  * @param {string} token - Raw JWT string
  * @returns {boolean}
  */
-const isBlocked = (token) => {
+// Run a cleanup task every 15 minutes to remove expired tokens
+setInterval(() => {
   const now = Date.now();
-
-  // Prune expired tokens from the map opportunistically
   for (const [t, expMs] of blocklist.entries()) {
     if (now > expMs) blocklist.delete(t);
   }
+}, 15 * 60 * 1000).unref(); // unref() so this timer doesn't prevent Node from exiting
 
+const isBlocked = (token) => {
   return blocklist.has(token);
 };
 

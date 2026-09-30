@@ -6,27 +6,26 @@ import { Calendar, Info, X } from 'lucide-react';
 import { toast } from 'react-toastify';
 
 const FacultyCalendar = () => {
-  const [events, setEvents] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
 
-  useEffect(() => {
-    const fetchCalendarEvents = async () => {
-      try {
-        const response = await api.get('/leaves/calendar');
-        if (response.data.success) {
-          setEvents(response.data.events);
-        }
-      } catch (error) {
-        console.error('Failed to fetch calendar events:', error);
-        toast.error('Failed to load leave events on calendar');
-      } finally {
-        setLoading(false);
+  const fetchCalendarEvents = async (info, successCallback, failureCallback) => {
+    setLoading(true);
+    try {
+      const response = await api.get(`/leaves/calendar?start=${info.startStr}&end=${info.endStr}`);
+      if (response.data.success) {
+        successCallback(response.data.events);
+      } else {
+        failureCallback(new Error('Failed fetching events'));
       }
-    };
-
-    fetchCalendarEvents();
-  }, []);
+    } catch (error) {
+      console.error('Failed to fetch calendar events:', error);
+      toast.error('Failed to load leave events on calendar');
+      failureCallback(error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleEventClick = (info) => {
     setSelectedEvent({
@@ -156,20 +155,22 @@ const FacultyCalendar = () => {
         </div>
 
         {/* Main Calendar View */}
-        <div className="lg:col-span-3 card">
+        <div className="lg:col-span-3 card relative">
           {/* Half-day event dashed border style */}
           <style>{`.half-day-event { border-style: dashed !important; border-width: 2px !important; opacity: 0.85; }`}</style>
-          {loading ? (
-            <div className="h-96 flex items-center justify-center">
+          
+          {loading && (
+            <div className="absolute inset-0 z-10 bg-white/50 dark:bg-slate-900/50 flex items-center justify-center backdrop-blur-[1px]">
               <div className="w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full animate-spin" />
             </div>
-          ) : (
-            <div className="fc-container">
-              <FullCalendar
-                plugins={[dayGridPlugin]}
-                initialView="dayGridMonth"
-                events={events}
-                eventClick={handleEventClick}
+          )}
+
+          <div className="fc-container">
+            <FullCalendar
+              plugins={[dayGridPlugin]}
+              initialView="dayGridMonth"
+              events={fetchCalendarEvents}
+              eventClick={handleEventClick}
                 headerToolbar={{
                   left: 'prev,next today',
                   center: 'title',
@@ -180,7 +181,6 @@ const FacultyCalendar = () => {
                 selectable={false}
               />
             </div>
-          )}
         </div>
       </div>
     </div>

@@ -84,6 +84,7 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    passwordChangedAt: Date,
     resetPasswordToken: String,
     resetPasswordExpire: Date,
   },
@@ -92,13 +93,20 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// Encrypt password before saving
+// Encrypt password before saving & track password change time
 userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) {
-    next();
+    return next();
   }
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
+
+  // Record when the password was changed (skip on brand-new documents)
+  if (!this.isNew) {
+    this.passwordChangedAt = Date.now() - 1000; // subtract 1s to ensure token issued after save is valid
+  }
+
+  next();
 });
 
 // Compare password

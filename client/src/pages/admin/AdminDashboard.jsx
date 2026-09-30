@@ -11,20 +11,17 @@ const AdminDashboard = () => {
   useEffect(() => {
     const fetchAdminDashboard = async () => {
       try {
-        // Fetch users count
-        const usersResponse = await api.get('/users?limit=1');
+        // Fire all 4 requests in parallel instead of sequentially
+        const [usersResponse, deptsResponse, pendingResponse, leavesResponse] = await Promise.all([
+          api.get('/users?limit=1'),
+          api.get('/departments?minimal=true'),
+          api.get('/leaves?status=pending&limit=1'),
+          api.get('/leaves?limit=5'),
+        ]);
+
         const totalUsers = usersResponse.data.totalUsers || 0;
-
-        // Fetch departments count
-        const deptsResponse = await api.get('/departments');
         const totalDepts = deptsResponse.data.count || 0;
-
-        // Fetch pending leaves count
-        const pendingResponse = await api.get('/leaves?status=pending&limit=1');
         const pendingCount = pendingResponse.data.totalLeaves || 0;
-
-        // Fetch recent leaves
-        const leavesResponse = await api.get('/leaves?limit=5');
         const recent = leavesResponse.data.leaves || [];
 
         setMetrics({

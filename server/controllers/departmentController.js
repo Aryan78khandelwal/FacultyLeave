@@ -6,10 +6,21 @@ const User = require('../models/User');
 // @access  Private
 const getDepartments = async (req, res, next) => {
   try {
-    const departments = await Department.find()
-      .populate('hod', 'name email employeeId designation avatar')
-      .populate('facultyList', 'name email employeeId designation role leaveBalance earnedLeaveEnabled avatar');
+    const { minimal } = req.query;
 
+    let query = Department.find();
+    
+    // Only perform deep populate if minimal is not requested
+    if (minimal !== 'true') {
+      query = query
+        .populate('hod', 'name email employeeId designation avatar')
+        .populate('facultyList', 'name email employeeId designation role leaveBalance earnedLeaveEnabled avatar');
+    } else {
+      // Use .lean() for minimal read-only queries to avoid heavy Mongoose docs
+      query = query.lean();
+    }
+
+    const departments = await query;
     res.status(200).json({ success: true, count: departments.length, departments });
   } catch (error) {
     next(error);

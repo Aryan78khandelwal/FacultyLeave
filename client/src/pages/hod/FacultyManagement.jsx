@@ -40,7 +40,7 @@ const FacultyManagement = () => {
 
   useEffect(() => {
     fetchFaculty();
-  }, [user]);
+  }, [user?._id]);
 
   const handleEditClick = (fac) => {
     setEditingFaculty(fac);

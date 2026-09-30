@@ -28,7 +28,7 @@ const HODDashboard = () => {
 
       const requests = [
         api.get(`/leaves?status=${batchedStatusParam}&page=${currentPage}&limit=${PAGE_SIZE}`),
-        api.get(`/leaves?status=approved&activeToday=true&limit=all`),
+        api.get(`/leaves?status=approved&activeToday=true&limit=1`),
       ];
 
       if (user?.department) {
@@ -55,7 +55,7 @@ const HODDashboard = () => {
       }
 
       if (!append) {
-        const activeToday = activeTodayRes?.data?.success ? activeTodayRes.data.count : 0;
+        const activeToday = activeTodayRes?.data?.success ? activeTodayRes.data.totalLeaves : 0;
         const deptSize = deptRes?.data?.success ? deptRes.data.department?.facultyList?.length || 0 : 0;
         setStats((prev) => ({ ...prev, activeToday, deptSize }));
       }
@@ -78,7 +78,7 @@ const HODDashboard = () => {
   useEffect(() => {
     setPage(1);
     fetchDashboardData(1, false);
-  }, [user]);
+  }, [user?._id]);
 
   const handleReview = async (id, status, reason = '') => {
     if (status === 'rejected' && !reason) {

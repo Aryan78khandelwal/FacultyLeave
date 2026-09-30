@@ -48,7 +48,8 @@ const getUsers = async (req, res, next) => {
       .populate('department', 'name')
       .skip(skipIndex)
       .limit(parseInt(limit))
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
     res.status(200).json({
       success: true,
@@ -68,7 +69,7 @@ const getUsers = async (req, res, next) => {
 // @access  Private/Admin
 const getUserById = async (req, res, next) => {
   try {
-    const user = await User.findById(req.params.id).populate('department');
+    const user = await User.findById(req.params.id).populate('department').lean();
 
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });

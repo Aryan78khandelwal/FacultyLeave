@@ -97,17 +97,25 @@ const applyLeave = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Selected date range contains only holidays. Leave days cannot be 0.' });
     }
 
-    // Check for overlapping leave requests (status: pending or approved)
-    const overlappingRequest = await LeaveRequest.findOne({
-      facultyId,
-      status: { $in: ['pending', 'approved'] },
-      $or: [
-        {
-          startDate: { $lte: new Date(endDate) },
-          endDate: { $gte: new Date(startDate) },
-        },
-      ],
-    });
+    // Run independent database queries in parallel
+    const [overlappingRequest, user, pendingLeaves] = await Promise.all([
+      LeaveRequest.findOne({
+        facultyId,
+        status: { $in: ['pending', 'approved'] },
+        $or: [
+          {
+            startDate: { $lte: new Date(endDate) },
+            endDate: { $gte: new Date(startDate) },
+          },
+        ],
+      }),
+      User.findById(facultyId),
+      LeaveRequest.find({
+        facultyId,
+        leaveType,
+        status: 'pending',
+      })
+    ]);
 
     if (overlappingRequest) {
       const startStr = new Date(overlappingRequest.startDate).toLocaleDateString();
@@ -118,8 +126,6 @@ const applyLeave = async (req, res, next) => {
       });
     }
 
-    // Get current user to check balance
-    const user = await User.findById(facultyId);
     if (!user) {
       return res.status(404).json({ success: false, message: 'Faculty user not found' });
     }
@@ -146,13 +152,6 @@ const applyLeave = async (req, res, next) => {
       else if (leaveType === 'ood') availableBalance = 10;
       else availableBalance = 0;
     }
-
-    // Calculate currently pending leaves of this type to avoid over-commitment
-    const pendingLeaves = await LeaveRequest.find({
-      facultyId,
-      leaveType,
-      status: 'pending',
-    });
 
     const pendingDays = pendingLeaves.reduce((acc, request) => acc + request.totalDays, 0);
 
@@ -233,8 +232,9 @@ const getLeaves = async (req, res, next) => {
         return res.status(200).json({ success: true, count: 0, leaves: [], totalPages: 0 });
       }
       
-      const facultyInDept = await User.find({ department: req.user.department._id }).select('_id');
-      const facultyIds = facultyInDept.map((f) => f._id);
+      // Use the already-populated department.facultyList from auth middleware
+      // instead of an extra User.find() query
+      const facultyIds = req.user.department.facultyList || [];
       
       // HOD can see their own leaves AND department leaves
       query.facultyId = { $in: facultyIds };
@@ -267,27 +267,34 @@ const getLeaves = async (req, res, next) => {
     const parsedLimit = isUnlimited ? 0 : parseInt(limit);
     const skipIndex = isUnlimited ? 0 : (page - 1) * parsedLimit;
 
-    const totalLeaves = await LeaveRequest.countDocuments(query);
     const leavesQuery = LeaveRequest.find(query)
-      .populate('facultyId', 'name email employeeId designation department')
       .populate({
         path: 'facultyId',
+        select: 'name email employeeId designation department',
         populate: { path: 'department', select: 'name' }
       })
       .populate('approvedBy', 'name role')
       .skip(skipIndex)
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
     if (!isUnlimited) leavesQuery.limit(parsedLimit);
-    const leaves = await leavesQuery;
+    
+    // Fix Issue #7: Parallelize count and find
+    const [totalLeaves, leaves] = await Promise.all([
+      isUnlimited ? Promise.resolve(0) : LeaveRequest.countDocuments(query),
+      leavesQuery
+    ]);
+    
+    const finalTotal = isUnlimited ? leaves.length : totalLeaves;
 
     const normalisedLeaves = leaves.map(normaliseLeave);
 
     res.status(200).json({
       success: true,
       count: normalisedLeaves.length,
-      totalPages: isUnlimited ? 1 : Math.ceil(totalLeaves / parsedLimit),
+      totalPages: isUnlimited ? 1 : Math.ceil(finalTotal / parsedLimit),
       currentPage: isUnlimited ? 1 : parseInt(page),
-      totalLeaves,
+      totalLeaves: finalTotal,
       leaves: normalisedLeaves,
     });
   } catch (error) {
@@ -306,7 +313,8 @@ const getLeaveById = async (req, res, next) => {
         path: 'facultyId',
         populate: { path: 'department', select: 'name' }
       })
-      .populate('approvedBy', 'name role');
+      .populate('approvedBy', 'name role')
+      .lean();
 
     if (!leave) {
       return res.status(404).json({ success: false, message: 'Leave request not found' });
@@ -361,10 +369,10 @@ const reviewLeave = async (req, res, next) => {
       if (!req.user.department) {
         return res.status(403).json({ success: false, message: 'Your account is not assigned to any department' });
       }
-      const dept = await Department.findById(req.user.department._id).select('facultyList hod');
+      const dept = req.user.department;
       const isMember =
         dept &&
-        (dept.facultyList.some((id) => id.toString() === leave.facultyId._id.toString()) ||
+        ((dept.facultyList && dept.facultyList.some((id) => id.toString() === leave.facultyId._id.toString())) ||
           (dept.hod && dept.hod.toString() === leave.facultyId._id.toString()));
       if (!isMember) {
         return res.status(403).json({ success: false, message: 'Not authorized to review leaves outside your department' });
@@ -372,18 +380,23 @@ const reviewLeave = async (req, res, next) => {
     }
 
 
+    // Fetch the faculty document once to be used for balance checks and updates
+    let facultyDoc;
+    if (['temporarily_approved', 'approved', 'rejected', 'certificate_rejected'].includes(status)) {
+      facultyDoc = await User.findById(leave.facultyId._id);
+    }
+
     if (status === 'temporarily_approved' || status === 'approved') {
-      const facultyToCheck = await User.findById(leave.facultyId._id);
-      if (leave.leaveType === 'earned' && facultyToCheck.earnedLeaveEnabled === false) {
+      if (leave.leaveType === 'earned' && facultyDoc.earnedLeaveEnabled === false) {
         return res.status(400).json({ success: false, message: 'Cannot approve. Earned leave is currently disabled for this account.' });
       }
-      if (leave.leaveType === 'restricted' && facultyToCheck.restrictedLeaveEnabled === false) {
+      if (leave.leaveType === 'restricted' && facultyDoc.restrictedLeaveEnabled === false) {
         return res.status(400).json({ success: false, message: 'Cannot approve. Restricted leave is currently disabled for this account.' });
       }
-      if (leave.leaveType === 'vacation' && facultyToCheck.vacationLeaveEnabled === false) {
+      if (leave.leaveType === 'vacation' && facultyDoc.vacationLeaveEnabled === false) {
         return res.status(400).json({ success: false, message: 'Cannot approve. Vacation leave is currently disabled for this account.' });
       }
-      if (leave.leaveType === 'ood' && facultyToCheck.oodLeaveEnabled === false) {
+      if (leave.leaveType === 'ood' && facultyDoc.oodLeaveEnabled === false) {
         return res.status(400).json({ success: false, message: 'Cannot approve. OOD leave is currently disabled for this account.' });
       }
     }
@@ -406,19 +419,17 @@ const reviewLeave = async (req, res, next) => {
     }
     // Process Approval
     else if (status === 'approved') {
-      const faculty = await User.findById(leave.facultyId._id);
-      
       // Double check balance just in case
-      if (faculty.leaveBalance[leave.leaveType] < leave.totalDays && leave.leaveType !== 'casual') {
+      if (facultyDoc.leaveBalance[leave.leaveType] < leave.totalDays && leave.leaveType !== 'casual') {
         return res.status(400).json({
           success: false,
-          message: `Cannot approve. Faculty member has insufficient balance of ${leave.leaveType} leave. Current Balance: ${faculty.leaveBalance[leave.leaveType]} days. Request requires: ${leave.totalDays} days.`,
+          message: `Cannot approve. Faculty member has insufficient balance of ${leave.leaveType} leave. Current Balance: ${facultyDoc.leaveBalance[leave.leaveType]} days. Request requires: ${leave.totalDays} days.`,
         });
       }
 
       // Deduct balance
-      faculty.leaveBalance[leave.leaveType] -= leave.totalDays;
-      await faculty.save();
+      facultyDoc.leaveBalance[leave.leaveType] -= leave.totalDays;
+      await facultyDoc.save();
 
       leave.status = 'approved';
       leave.approvedBy = req.user._id;
@@ -441,10 +452,9 @@ const reviewLeave = async (req, res, next) => {
       // This covers the case where an approved leave is being certificate_rejected
       // or any future scenario where an approved leave is reverted.
       if (leave.status === 'approved') {
-        const faculty = await User.findById(leave.facultyId._id);
-        faculty.leaveBalance[leave.leaveType] += leave.totalDays;
-        faculty.markModified('leaveBalance');
-        await faculty.save();
+        facultyDoc.leaveBalance[leave.leaveType] += leave.totalDays;
+        facultyDoc.markModified('leaveBalance');
+        await facultyDoc.save();
       }
 
       leave.status = status;
@@ -482,91 +492,91 @@ const getLeaveAnalytics = async (req, res, next) => {
       if (!req.user.department) {
         return res.status(200).json({ success: true, stats: {} });
       }
-      const departmentFaculty = await User.find({ department: req.user.department._id }).select('_id');
-      const facultyIds = departmentFaculty.map((f) => f._id);
+      // Use the already-populated department.facultyList from auth middleware
+      const facultyIds = req.user.department.facultyList || [];
       scopeQuery.facultyId = { $in: facultyIds };
     }
 
-    // A. Approved vs Rejected Ratio
-    const statusStats = await LeaveRequest.aggregate([
-      { $match: scopeQuery },
-      { $group: { _id: '$status', count: { $sum: 1 } } },
-    ]);
-
-    // B. Leave Type Distribution
-    const typeStats = await LeaveRequest.aggregate([
-      { $match: scopeQuery },
-      { $group: { _id: '$leaveType', count: { $sum: 1 }, totalDays: { $sum: '$totalDays' } } },
-    ]);
-
-    // C. Monthly Leave Trends (Last 6 Months)
+    // Prepare date filter for monthly trends
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
     sixMonthsAgo.setDate(1);
     sixMonthsAgo.setHours(0, 0, 0, 0);
 
-    const monthlyStats = await LeaveRequest.aggregate([
-      {
-        $match: {
-          ...scopeQuery,
-          startDate: { $gte: sixMonthsAgo },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            year: { $year: '$startDate' },
-            month: { $month: '$startDate' },
-          },
-          count: { $sum: 1 },
-          days: { $sum: '$totalDays' },
-        },
-      },
-      { $sort: { '_id.year': 1, '_id.month': 1 } },
-    ]);
-
-    // D. Department-wise Leave Stats (Admin Only)
-    let deptStats = [];
-    if (req.user.role === 'Admin') {
-      deptStats = await LeaveRequest.aggregate([
+    // Run all independent aggregations in parallel instead of sequentially
+    const analyticsPromises = [
+      // A. Approved vs Rejected Ratio
+      LeaveRequest.aggregate([
+        { $match: scopeQuery },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
+      // B. Leave Type Distribution
+      LeaveRequest.aggregate([
+        { $match: scopeQuery },
+        { $group: { _id: '$leaveType', count: { $sum: 1 }, totalDays: { $sum: '$totalDays' } } },
+      ]),
+      // C. Monthly Leave Trends (Last 6 Months)
+      LeaveRequest.aggregate([
         {
-          $lookup: {
-            from: 'users',
-            localField: 'facultyId',
-            foreignField: '_id',
-            as: 'faculty',
+          $match: {
+            ...scopeQuery,
+            startDate: { $gte: sixMonthsAgo },
           },
         },
-        { $unwind: '$faculty' },
-        {
-          $lookup: {
-            from: 'departments',
-            localField: 'faculty.department',
-            foreignField: '_id',
-            as: 'dept',
-          },
-        },
-        { $unwind: { path: '$dept', preserveNullAndEmptyArrays: true } },
         {
           $group: {
-            _id: { $ifNull: ['$dept.name', 'Unassigned'] },
+            _id: {
+              year: { $year: '$startDate' },
+              month: { $month: '$startDate' },
+            },
             count: { $sum: 1 },
             days: { $sum: '$totalDays' },
           },
         },
-      ]);
-    }
+        { $sort: { '_id.year': 1, '_id.month': 1 } },
+      ]),
+      // D. Department-wise Leave Stats (Admin Only)
+      req.user.role === 'Admin'
+        ? LeaveRequest.aggregate([
+            {
+              $lookup: {
+                from: 'users',
+                localField: 'facultyId',
+                foreignField: '_id',
+                as: 'faculty',
+              },
+            },
+            { $unwind: '$faculty' },
+            {
+              $lookup: {
+                from: 'departments',
+                localField: 'faculty.department',
+                foreignField: '_id',
+                as: 'dept',
+              },
+            },
+            { $unwind: { path: '$dept', preserveNullAndEmptyArrays: true } },
+            {
+              $group: {
+                _id: { $ifNull: ['$dept.name', 'Unassigned'] },
+                count: { $sum: 1 },
+                days: { $sum: '$totalDays' },
+              },
+            },
+          ])
+        : Promise.resolve([]),
+      // E. Faculty Leave Usage (HOD and Admin view)
+      !['Faculty', 'Instructor', 'SDA'].includes(req.user.role)
+        ? User.find(
+            req.user.role === 'HOD' ? { department: req.user.department._id } : {}
+          )
+            .select('name employeeId designation leaveBalance')
+            .populate('department', 'name')
+            .limit(10)
+        : Promise.resolve([]),
+    ];
 
-    // E. Faculty Leave Usage (HOD and Admin view)
-    let usageStats = [];
-    if (!['Faculty', 'Instructor', 'SDA'].includes(req.user.role)) {
-      usageStats = await User.find(
-        req.user.role === 'HOD' ? { department: req.user.department._id } : {}
-      )
-        .select('name employeeId designation leaveBalance')
-        .populate('department', 'name')
-        .limit(10);
-    }
+    const [statusStats, typeStats, monthlyStats, deptStats, usageStats] = await Promise.all(analyticsPromises);
 
     res.status(200).json({
       success: true,
@@ -588,7 +598,14 @@ const getLeaveAnalytics = async (req, res, next) => {
 // @access  Private
 const getCalendarLeaves = async (req, res, next) => {
   try {
+    const { start, end } = req.query;
     let query = { status: { $in: ['approved', 'pending'] } }; // Include both approved and pending so HODs and Faculty can view upcoming scheduled blocks. Color coding distinguishes them.
+    
+    // Add date range filter to only fetch events for the visible calendar month
+    if (start && end) {
+      query.startDate = { $lte: new Date(end) };
+      query.endDate = { $gte: new Date(start) };
+    }
 
     if (['Faculty', 'Instructor', 'SDA'].includes(req.user.role)) {
       query.facultyId = req.user._id;
@@ -596,12 +613,12 @@ const getCalendarLeaves = async (req, res, next) => {
       if (!req.user.department) {
         return res.status(200).json({ success: true, events: [] });
       }
-      const departmentFaculty = await User.find({ department: req.user.department._id }).select('_id');
-      const facultyIds = departmentFaculty.map((f) => f._id);
+      // Use the already-populated department.facultyList from auth middleware
+      const facultyIds = req.user.department.facultyList || [];
       query.facultyId = { $in: facultyIds };
     }
 
-    const leaves = await LeaveRequest.find(query).populate('facultyId', 'name designation');
+    const leaves = await LeaveRequest.find(query).populate('facultyId', 'name designation').lean();
 
     // Format events for FullCalendar: id, title, start, end, color
     const events = leaves.map((leave) => {

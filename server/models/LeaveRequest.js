@@ -82,5 +82,15 @@ const leaveRequestSchema = new mongoose.Schema(
   }
 );
 
+// Compound indexes for common query patterns
+// 1. getLeaves: filter by faculty + status, sorted by createdAt
+leaveRequestSchema.index({ facultyId: 1, status: 1, createdAt: -1 });
+// 2. Overlap check & activeToday filter: status + date range queries
+leaveRequestSchema.index({ status: 1, startDate: 1, endDate: 1 });
+// 3. Pending leaves per type (balance check on apply)
+leaveRequestSchema.index({ facultyId: 1, leaveType: 1, status: 1 });
+// 4. Analytics: monthly trends by startDate
+leaveRequestSchema.index({ startDate: 1 });
+
 const LeaveRequest = mongoose.model('LeaveRequest', leaveRequestSchema);
 module.exports = LeaveRequest;

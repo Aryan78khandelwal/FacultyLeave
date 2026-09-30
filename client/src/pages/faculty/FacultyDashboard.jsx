@@ -13,14 +13,16 @@ const FacultyDashboard = () => {
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
-        // Fetch recent leaves
-        const leavesResponse = await api.get('/leaves?limit=5');
+        // Fetch recent leaves and analytics in parallel
+        const [leavesResponse, analyticsResponse] = await Promise.all([
+          api.get('/leaves?limit=5'),
+          api.get('/leaves/analytics')
+        ]);
+
         if (leavesResponse.data.success) {
           setRecentLeaves(leavesResponse.data.leaves);
         }
 
-        // Fetch analytics
-        const analyticsResponse = await api.get('/leaves/analytics');
         if (analyticsResponse.data.success) {
           const statusStats = analyticsResponse.data.stats.statusStats || [];
           let approved = 0, pending = 0, rejected = 0;
