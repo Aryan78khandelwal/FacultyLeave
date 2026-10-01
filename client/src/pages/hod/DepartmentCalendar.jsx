@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import api from '../../services/api';
@@ -6,33 +6,39 @@ import { Calendar, Info, X } from 'lucide-react';
 import { toast } from 'react-toastify';
 
 const DepartmentCalendar = () => {
-  const [events, setEvents] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
 
-  useEffect(() => {
-    const fetchCalendarEvents = async () => {
-      try {
-        const response = await api.get('/leaves/calendar');
-        if (response.data.success) {
-          setEvents(response.data.events);
-        }
-      } catch (error) {
-        console.error('Failed to fetch department calendar:', error);
-        toast.error('Failed to load department leaves on calendar');
-      } finally {
-        setLoading(false);
+  // Use FullCalendar's event source function to fetch events per visible range.
+  // This runs automatically on mount and every time the user navigates months.
+  const fetchCalendarEvents = async (info, successCallback, failureCallback) => {
+    setLoading(true);
+    try {
+      const response = await api.get(
+        `/leaves/calendar?start=${info.startStr}&end=${info.endStr}`
+      );
+      if (response.data.success) {
+        successCallback(response.data.events);
+      } else {
+        failureCallback(new Error('Failed fetching events'));
       }
-    };
-
-    fetchCalendarEvents();
-  }, []);
+    } catch (error) {
+      console.error('Failed to fetch department calendar:', error);
+      toast.error('Failed to load department leaves on calendar');
+      failureCallback(error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleEventClick = (info) => {
     setSelectedEvent({
       title: info.event.title,
       start: info.event.start,
-      end: info.event.end ? new Date(info.event.end.getTime() - 24 * 60 * 60 * 1000) : info.event.start, // Subtract 1 day for inclusive end date
+      // Subtract 1 day because FullCalendar's end date is exclusive
+      end: info.event.end
+        ? new Date(info.event.end.getTime() - 24 * 60 * 60 * 1000)
+        : info.event.start,
       extendedProps: info.event.extendedProps,
     });
   };
@@ -157,31 +163,32 @@ const DepartmentCalendar = () => {
         </div>
 
         {/* Calendar Grid */}
-        <div className="lg:col-span-3 card">
+        <div className="lg:col-span-3 card relative">
           {/* Half-day event dashed border style */}
           <style>{`.half-day-event { border-style: dashed !important; border-width: 2px !important; opacity: 0.85; }`}</style>
-          {loading ? (
-            <div className="h-96 flex items-center justify-center">
+
+          {loading && (
+            <div className="absolute inset-0 z-10 bg-white/50 dark:bg-slate-900/50 flex items-center justify-center backdrop-blur-[1px] rounded-xl">
               <div className="w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full animate-spin" />
             </div>
-          ) : (
-            <div className="fc-container">
-              <FullCalendar
-                plugins={[dayGridPlugin]}
-                initialView="dayGridMonth"
-                events={events}
-                eventClick={handleEventClick}
-                headerToolbar={{
-                  left: 'prev,next today',
-                  center: 'title',
-                  right: 'dayGridMonth',
-                }}
-                height="auto"
-                editable={false}
-                selectable={false}
-              />
-            </div>
           )}
+
+          <div className="fc-container">
+            <FullCalendar
+              plugins={[dayGridPlugin]}
+              initialView="dayGridMonth"
+              events={fetchCalendarEvents}
+              eventClick={handleEventClick}
+              headerToolbar={{
+                left: 'prev,next today',
+                center: 'title',
+                right: 'dayGridMonth',
+              }}
+              height="auto"
+              editable={false}
+              selectable={false}
+            />
+          </div>
         </div>
       </div>
     </div>

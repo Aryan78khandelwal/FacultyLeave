@@ -437,7 +437,7 @@ const reviewLeave = async (req, res, next) => {
 
       // Send Email
       try {
-        await sendLeaveApprovedEmail(faculty.email, faculty.name, leave, req.user.name);
+        await sendLeaveApprovedEmail(facultyDoc.email, facultyDoc.name, leave, req.user.name);
       } catch (err) {
         console.error('Approved email error:', err.message);
       }
