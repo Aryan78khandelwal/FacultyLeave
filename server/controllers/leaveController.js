@@ -600,11 +600,18 @@ const getCalendarLeaves = async (req, res, next) => {
   try {
     const { start, end } = req.query;
     let query = { status: { $in: ['approved', 'pending'] } }; // Include both approved and pending so HODs and Faculty can view upcoming scheduled blocks. Color coding distinguishes them.
-    
-    // Add date range filter to only fetch events for the visible calendar month
+
+    // Add date range filter to only fetch events for the visible calendar month.
+    // Guard against malformed strings: new Date("bad") produces an Invalid Date
+    // object which Mongoose rejects with a CastError crash.
     if (start && end) {
-      query.startDate = { $lte: new Date(end) };
-      query.endDate = { $gte: new Date(start) };
+      const startDate = new Date(start);
+      const endDate   = new Date(end);
+      if (!isNaN(startDate.valueOf()) && !isNaN(endDate.valueOf())) {
+        query.startDate = { $lte: endDate };
+        query.endDate   = { $gte: startDate };
+      }
+      // If dates are invalid we skip the range filter — safe fallback, calendar still loads.
     }
 
     if (['Faculty', 'Instructor', 'SDA'].includes(req.user.role)) {
