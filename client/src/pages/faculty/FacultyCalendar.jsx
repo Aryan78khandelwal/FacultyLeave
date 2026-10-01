@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import api from '../../services/api';
@@ -9,7 +9,11 @@ const FacultyCalendar = () => {
   const [loading, setLoading] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
 
-  const fetchCalendarEvents = async (info, successCallback, failureCallback) => {
+  // useCallback ensures FullCalendar receives a stable function reference.
+  // Without it, every setLoading() call re-renders the component, creates a
+  // new function object, and FullCalendar treats it as a new event source —
+  // triggering an infinite fetch loop that spams the server.
+  const fetchCalendarEvents = useCallback(async (info, successCallback, failureCallback) => {
     setLoading(true);
     try {
       const response = await api.get(`/leaves/calendar?start=${info.startStr}&end=${info.endStr}`);
@@ -25,7 +29,7 @@ const FacultyCalendar = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const handleEventClick = (info) => {
     setSelectedEvent({
