@@ -551,11 +551,12 @@ const ApplyLeave = () => {
           <div className="card bg-slate-50 dark:bg-gray-800">
             <h3 className="font-bold text-slate-800 dark:text-white mb-4">Guidelines</h3>
             <ul className="text-xs space-y-3 text-slate-500 dark:text-slate-400 list-disc pl-4">
-              <li>Leave applications should be submitted at least 3 days prior to scheduled dates except for medical emergencies.</li>
-              <li>Calculated days represent academic calendar days (inclusive of weekends/holidays if leave wraps them).</li>
-              <li>A supporting document (medical certificate, official letter) is required for restricted leaves exceeding 2 consecutive days.</li>
-              <li>Upon submission, the HOD of your department receives an email notification to approve or reject.</li>
-              <li>If approved, the leave duration is automatically deducted from your balances. If rejected, you will be notified with comments.</li>
+              <li>Leave Applications should be submitted at least three days prior to scheduled leave dates, except in the event of a medical emergency.</li>
+              <li>If approved, your leave duration will be deducted from your balances. If rejected, you will be notified with comments.</li>
+              <li>Calculated days represent academic calendar days inclusive of weekends and holidays if leave falls within them.</li>
+              <li>For OODs, your leave will only be approved temporarily by the Division Head. Leave status will only be marked as completed after you have uploaded the relevant documents for proof.</li>
+              <li>Vacations will be updated by the admin and has to be finished in the set time frame.</li>
+              <li>A supporting document (medical certificate) is required for CL/EL exceeding 3 consecutive days.</li>
             </ul>
           </div>
         </div>
