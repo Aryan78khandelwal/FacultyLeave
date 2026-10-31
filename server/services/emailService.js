@@ -1,85 +1,35 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const he = require('he'); // HTML entity encoder for XSS-safe email templates
 
-let transporter;
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Initialize Transporter
-const initTransporter = async () => {
-  if (transporter) return transporter;
-
-  const isSmtpConfigured = process.env.SMTP_USER && process.env.SMTP_PASS;
-
-  if (isSmtpConfigured) {
-    console.log('Using configured SMTP settings for sending emails.');
-    transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: process.env.SMTP_PORT === '465',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-      connectionTimeout: 10000, // 10s – fail fast if cloud provider blocks SMTP
-      greetingTimeout: 10000,
-    });
-
-    // Verify SMTP connectivity at startup; log a warning if the host blocks SMTP
-    transporter.verify().then(() => {
-      console.log('SMTP connection verified successfully.');
-    }).catch((err) => {
-      console.warn('⚠  SMTP connection failed:', err.message);
-      console.warn('   Emails will be skipped. If deployed on Railway/Render, use an HTTP email API (Resend, SendGrid).');
-    });
-  } else {
-    console.log('SMTP user/pass not configured. Initializing Ethereal email fallback account...');
-    try {
-      const testAccount = await nodemailer.createTestAccount();
-      transporter = nodemailer.createTransport({
-        host: 'smtp.ethereal.email',
-        port: 587,
-        secure: false,
-        auth: {
-          user: testAccount.user,
-          pass: testAccount.pass,
-        },
-      });
-      console.log(`Ethereal email test account created successfully:`);
-      console.log(`User: ${testAccount.user}`);
-      console.log(`Pass: ${testAccount.pass}`);
-    } catch (error) {
-      console.error('Failed to create Ethereal test email account: ', error.message);
-    }
-  }
-
-  return transporter;
-};
+// FROM address: Resend free plan uses their shared sender domain
+const FROM_ADDRESS = process.env.SMTP_FROM || 'Faculty Leave System <onboarding@resend.dev>';
 
 // Send email utility function
 const sendEmail = async (options) => {
-  const mailTransporter = await initTransporter();
-  if (!mailTransporter) {
-    console.log('Email transporter not initialized. Skipping email send.');
+  if (!process.env.RESEND_API_KEY) {
+    console.warn('⚠  RESEND_API_KEY not set. Skipping email send.');
     return;
   }
 
-  const mailOptions = {
-    from: process.env.SMTP_FROM || 'Faculty Leave System <noreply@college.edu>',
-    to: options.to,
-    subject: options.subject,
-    html: options.html,
-  };
-
   try {
-    const info = await mailTransporter.sendMail(mailOptions);
-    console.log(`Email sent: ${info.messageId}`);
-    
-    // Output Ethereal preview link if applicable
-    if (nodemailer.getTestMessageUrl(info)) {
-      console.log(`Preview URL: ${nodemailer.getTestMessageUrl(info)}`);
+    const { data, error } = await resend.emails.send({
+      from: FROM_ADDRESS,
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+    });
+
+    if (error) {
+      console.error('Error sending email via Resend:', error.message || error);
+      return;
     }
-    return info;
+
+    console.log(`Email sent successfully. ID: ${data.id}`);
+    return data;
   } catch (error) {
-    console.error('Error sending email: ', error.message);
+    console.error('Error sending email via Resend:', error.message);
   }
 };
 
