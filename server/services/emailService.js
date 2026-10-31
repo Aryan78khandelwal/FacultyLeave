@@ -1,35 +1,39 @@
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 const he = require('he'); // HTML entity encoder for XSS-safe email templates
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Brevo SMTP transporter
+const transporter = nodemailer.createTransport({
+  host: 'smtp-relay.brevo.com',
+  port: 587,
+  secure: false,
+  auth: {
+    user: process.env.BREVO_SMTP_USER,
+    pass: process.env.BREVO_SMTP_KEY,
+  },
+});
 
-// FROM address: Resend free plan uses their shared sender domain
-const FROM_ADDRESS = process.env.SMTP_FROM || 'Faculty Leave System <onboarding@resend.dev>';
+const FROM_ADDRESS = process.env.SMTP_FROM || 'Faculty Leave System <noreply@yourdomain.com>';
 
 // Send email utility function
 const sendEmail = async (options) => {
-  if (!process.env.RESEND_API_KEY) {
-    console.warn('⚠  RESEND_API_KEY not set. Skipping email send.');
+  if (!process.env.BREVO_SMTP_USER || !process.env.BREVO_SMTP_KEY) {
+    console.warn('⚠  BREVO_SMTP_USER or BREVO_SMTP_KEY not set. Skipping email send.');
     return;
   }
 
   try {
-    const { data, error } = await resend.emails.send({
+    const info = await transporter.sendMail({
       from: FROM_ADDRESS,
       to: options.to,
       subject: options.subject,
       html: options.html,
     });
 
-    if (error) {
-      console.error('Error sending email via Resend:', error.message || error);
-      return;
-    }
-
-    console.log(`Email sent successfully. ID: ${data.id}`);
-    return data;
+    console.log(`Email sent successfully. Message ID: ${info.messageId}`);
+    return info;
   } catch (error) {
-    console.error('Error sending email via Resend:', error.message);
+    console.error('Error sending email via Brevo:', error.message);
+    throw error;
   }
 };
 
