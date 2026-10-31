@@ -1,40 +1,58 @@
-const nodemailer = require('nodemailer');
+const https = require('https');
 const he = require('he'); // HTML entity encoder for XSS-safe email templates
 
-// Brevo SMTP transporter
-const transporter = nodemailer.createTransport({
-  host: 'smtp-relay.brevo.com',
-  port: 587,
-  secure: false,
-  auth: {
-    user: process.env.BREVO_SMTP_USER,
-    pass: process.env.BREVO_SMTP_KEY,
-  },
-});
-
-const FROM_ADDRESS = process.env.SMTP_FROM || 'Faculty Leave System <noreply@yourdomain.com>';
-
-// Send email utility function
+// Brevo HTTP API — works on Railway (uses port 443, not blocked SMTP ports)
 const sendEmail = async (options) => {
-  if (!process.env.BREVO_SMTP_USER || !process.env.BREVO_SMTP_KEY) {
-    console.warn('⚠  BREVO_SMTP_USER or BREVO_SMTP_KEY not set. Skipping email send.');
+  if (!process.env.BREVO_API_KEY) {
+    console.warn('⚠  BREVO_API_KEY not set. Skipping email send.');
     return;
   }
 
-  try {
-    const info = await transporter.sendMail({
-      from: FROM_ADDRESS,
-      to: options.to,
-      subject: options.subject,
-      html: options.html,
-    });
+  const senderName = process.env.SMTP_FROM_NAME || 'Faculty Leave System';
+  const senderEmail = process.env.SMTP_FROM_EMAIL || 'cooolbuddy57@gmail.com';
 
-    console.log(`Email sent successfully. Message ID: ${info.messageId}`);
-    return info;
-  } catch (error) {
-    console.error('Error sending email via Brevo:', error.message);
-    throw error;
-  }
+  const payload = JSON.stringify({
+    sender: { name: senderName, email: senderEmail },
+    to: [{ email: options.to }],
+    subject: options.subject,
+    htmlContent: options.html,
+  });
+
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        hostname: 'api.brevo.com',
+        path: '/v3/smtp/email',
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'api-key': process.env.BREVO_API_KEY,
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload),
+        },
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            console.log(`Email sent successfully via Brevo API. Status: ${res.statusCode}`);
+            resolve(JSON.parse(data));
+          } else {
+            const errMsg = `Brevo API error ${res.statusCode}: ${data}`;
+            console.error('Error sending email via Brevo:', errMsg);
+            reject(new Error(errMsg));
+          }
+        });
+      }
+    );
+    req.on('error', (error) => {
+      console.error('Error sending email via Brevo:', error.message);
+      reject(error);
+    });
+    req.write(payload);
+    req.end();
+  });
 };
 
 // Account Created Template

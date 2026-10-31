@@ -3,6 +3,10 @@ const Department = require('../models/Department');
 const LeaveRequest = require('../models/LeaveRequest');
 const { sendAccountCreatedEmail } = require('../services/emailService');
 
+// Safe number parsers — prevent NaN from empty strings crashing Mongoose
+const safeInt = (val, fallback) => { const n = parseInt(val); return isNaN(n) ? fallback : n; };
+const safeFloat = (val, fallback) => { const n = parseFloat(val); return isNaN(n) ? fallback : n; };
+
 // Generate random password helper
 const generateRandomPassword = (length = 8) => {
   const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$';
@@ -119,10 +123,10 @@ const createUser = async (req, res, next) => {
     // If custom leave balances are supplied
     if (leaveBalance) {
       userData.leaveBalance = {
-        casual: leaveBalance.casual !== undefined ? parseFloat(leaveBalance.casual) : 12,
-        restricted: leaveBalance.restricted !== undefined ? parseInt(leaveBalance.restricted) : 10,
-        earned: leaveBalance.earned !== undefined ? parseInt(leaveBalance.earned) : 15,
-        vacation: role === 'HOD' ? 0 : (leaveBalance.vacation !== undefined ? parseInt(leaveBalance.vacation) : 11),
+        casual: leaveBalance.casual !== undefined ? safeFloat(leaveBalance.casual, 12) : 12,
+        restricted: leaveBalance.restricted !== undefined ? safeInt(leaveBalance.restricted, 10) : 10,
+        earned: leaveBalance.earned !== undefined ? safeInt(leaveBalance.earned, 15) : 15,
+        vacation: role === 'HOD' ? 0 : (leaveBalance.vacation !== undefined ? safeInt(leaveBalance.vacation, 11) : 11),
       };
     }
 
@@ -227,10 +231,10 @@ const updateUser = async (req, res, next) => {
 
     if (leaveBalance) {
       user.leaveBalance = {
-        casual: leaveBalance.casual !== undefined ? parseFloat(leaveBalance.casual) : user.leaveBalance.casual,
-        restricted: leaveBalance.restricted !== undefined ? parseInt(leaveBalance.restricted) : user.leaveBalance.restricted,
-        earned: leaveBalance.earned !== undefined ? parseInt(leaveBalance.earned) : user.leaveBalance.earned,
-        vacation: (role || user.role) === 'HOD' ? 0 : (leaveBalance.vacation !== undefined ? parseInt(leaveBalance.vacation) : user.leaveBalance.vacation),
+        casual: leaveBalance.casual !== undefined ? safeFloat(leaveBalance.casual, user.leaveBalance.casual) : user.leaveBalance.casual,
+        restricted: leaveBalance.restricted !== undefined ? safeInt(leaveBalance.restricted, user.leaveBalance.restricted) : user.leaveBalance.restricted,
+        earned: leaveBalance.earned !== undefined ? safeInt(leaveBalance.earned, user.leaveBalance.earned) : user.leaveBalance.earned,
+        vacation: (role || user.role) === 'HOD' ? 0 : (leaveBalance.vacation !== undefined ? safeInt(leaveBalance.vacation, user.leaveBalance.vacation) : user.leaveBalance.vacation),
       };
     }
 
