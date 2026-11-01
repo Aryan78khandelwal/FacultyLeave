@@ -1,24 +1,46 @@
 const https = require('https');
 const he = require('he'); // HTML entity encoder for XSS-safe email templates
 
+const EMAIL_TIMEOUT_MS = 10_000; // 10-second hard timeout on every Brevo HTTP request
+
 // Brevo HTTP API — works on Railway (uses port 443, not blocked SMTP ports)
 const sendEmail = async (options) => {
   if (!process.env.BREVO_API_KEY) {
-    console.warn('⚠  BREVO_API_KEY not set. Skipping email send.');
-    return;
+    throw new Error('BREVO_API_KEY not configured. Cannot send email.');
   }
 
   const senderName = process.env.SMTP_FROM_NAME || 'Faculty Leave System';
   const senderEmail = process.env.SMTP_FROM_EMAIL || 'cooolbuddy57@gmail.com';
 
-  const payload = JSON.stringify({
+  const body = {
     sender: { name: senderName, email: senderEmail },
     to: [{ email: options.to }],
     subject: options.subject,
     htmlContent: options.html,
-  });
+  };
+
+  // Provide idempotency key in headers payload if specified
+  if (options.idempotencyKey) {
+    body.headers = { idempotencyKey: String(options.idempotencyKey) };
+  }
+
+  const payload = JSON.stringify(body);
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (fn, val) => {
+      if (!settled) {
+        settled = true;
+        fn(val);
+      }
+    };
+
+    // True wall-clock deadline covering DNS + connect + full response
+    const deadline = setTimeout(() => {
+      settle(reject, new Error(`Brevo API request timed out after ${EMAIL_TIMEOUT_MS}ms`));
+      req.destroy();
+    }, EMAIL_TIMEOUT_MS);
+
     const req = https.request(
       {
         hostname: 'api.brevo.com',
@@ -35,42 +57,71 @@ const sendEmail = async (options) => {
         let data = '';
         res.on('data', (chunk) => { data += chunk; });
         res.on('end', () => {
+          clearTimeout(deadline);
           if (res.statusCode >= 200 && res.statusCode < 300) {
             console.log(`Email sent successfully via Brevo API. Status: ${res.statusCode}`);
-            resolve(JSON.parse(data));
+            try {
+              settle(resolve, JSON.parse(data));
+            } catch (parseErr) {
+              settle(reject, new Error(`Invalid JSON from Brevo: ${data.substring(0, 200)}`));
+            }
           } else {
+            // Check for Brevo idempotency duplicate_parameter response.
+            // Specifically verify that the duplicate parameter is the idempotencyKey,
+            // avoiding false positives for other duplicate parameters (e.g. duplicate recipients).
+            try {
+              const errJson = JSON.parse(data);
+              const errMsg = typeof errJson?.message === 'string' ? errJson.message.toLowerCase() : '';
+              const errParam = typeof errJson?.parameter === 'string' ? errJson.parameter.toLowerCase() : '';
+
+              const isIdempotencyDuplicate =
+                options.idempotencyKey &&
+                (errMsg.includes('idempotency') || errParam.includes('idempotency'));
+
+              if (isIdempotencyDuplicate) {
+                console.log(
+                  `[emailService] Brevo idempotency key confirmed: email was already processed with key ${options.idempotencyKey}. Treating as successful delivery.`
+                );
+                return settle(resolve, { idempotentDuplicate: true, ...errJson });
+              }
+            } catch {}
+
             const errMsg = `Brevo API error ${res.statusCode}: ${data}`;
             console.error('Error sending email via Brevo:', errMsg);
-            reject(new Error(errMsg));
+            settle(reject, new Error(errMsg));
           }
         });
       }
     );
     req.on('error', (error) => {
+      clearTimeout(deadline);
       console.error('Error sending email via Brevo:', error.message);
-      reject(error);
+      settle(reject, error);
     });
     req.write(payload);
     req.end();
   });
 };
 
-// Account Created Template
-const sendAccountCreatedEmail = async (user, rawPassword) => {
+// Account Created Template (Welcome email containing non-sensitive details only, no password)
+const sendAccountCreatedEmail = async (user, options = {}) => {
+  const loginUrl = process.env.FRONTEND_URL
+    ? `${process.env.FRONTEND_URL}/login`
+    : 'http://localhost:5173/login';
+
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
       <h2 style="color: #2563eb; text-align: center;">Welcome to the Faculty Leave System</h2>
       <p>Hello <strong>${user.name}</strong>,</p>
-      <p>Your account has been created by the Administrator. Below are your login credentials:</p>
+      <p>Your account has been created by the Administrator. Below are your account details:</p>
       <div style="background-color: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #cbd5e1;">
         <p style="margin: 5px 0;"><strong>Role:</strong> ${user.role}</p>
         <p style="margin: 5px 0;"><strong>Employee ID:</strong> ${user.employeeId}</p>
         <p style="margin: 5px 0;"><strong>Email:</strong> ${user.email}</p>
-        <p style="margin: 5px 0;"><strong>Password:</strong> <span style="font-family: monospace; font-size: 1.1em; color: #dc2626;">${rawPassword}</span></p>
       </div>
-      <p style="color: #475569; font-size: 0.9em;">Please log in at your earliest convenience and update your password from your profile settings.</p>
+      <p style="color: #475569; font-size: 0.9em;">Your initial login password has been provided to you separately by the Administrator. Please log in using that password and update it from your profile settings whenever you wish.</p>
       <div style="text-align: center; margin-top: 30px;">
-        <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">Log In Now</a>
+        <a href="${loginUrl}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">Log In Now</a>
       </div>
     </div>
   `;
@@ -79,11 +130,12 @@ const sendAccountCreatedEmail = async (user, rawPassword) => {
     to: user.email,
     subject: 'Welcome! Your Faculty Leave Account is Ready',
     html,
+    idempotencyKey: options.idempotencyKey,
   });
 };
 
 // Leave Applied (Notification to HOD)
-const sendLeaveAppliedEmail = async (hodEmail, hodName, facultyName, leaveRequest) => {
+const sendLeaveAppliedEmail = async (hodEmail, hodName, facultyName, leaveRequest, options = {}) => {
   const startDateStr = new Date(leaveRequest.startDate).toLocaleDateString();
   const endDateStr = new Date(leaveRequest.endDate).toLocaleDateString();
 
@@ -121,11 +173,12 @@ const sendLeaveAppliedEmail = async (hodEmail, hodName, facultyName, leaveReques
     to: hodEmail,
     subject: `Leave Request Submitted - ${facultyName}`,
     html,
+    idempotencyKey: options.idempotencyKey,
   });
 };
 
 // Leave Approved Template
-const sendLeaveApprovedEmail = async (facultyEmail, facultyName, leaveRequest, reviewerName) => {
+const sendLeaveApprovedEmail = async (facultyEmail, facultyName, leaveRequest, reviewerName, options = {}) => {
   const startDateStr = new Date(leaveRequest.startDate).toLocaleDateString();
   const endDateStr = new Date(leaveRequest.endDate).toLocaleDateString();
 
@@ -147,11 +200,12 @@ const sendLeaveApprovedEmail = async (facultyEmail, facultyName, leaveRequest, r
     to: facultyEmail,
     subject: 'Approved: Your Leave Application has been Approved',
     html,
+    idempotencyKey: options.idempotencyKey,
   });
 };
 
 // Leave Temporarily Approved (OOD) Template
-const sendLeaveTemporarilyApprovedEmail = async (facultyEmail, facultyName, leaveRequest, reviewerName) => {
+const sendLeaveTemporarilyApprovedEmail = async (facultyEmail, facultyName, leaveRequest, reviewerName, options = {}) => {
   const startDateStr = new Date(leaveRequest.startDate).toLocaleDateString();
   const endDateStr = new Date(leaveRequest.endDate).toLocaleDateString();
 
@@ -177,11 +231,12 @@ const sendLeaveTemporarilyApprovedEmail = async (facultyEmail, facultyName, leav
     to: facultyEmail,
     subject: 'Action Required: Upload Duty Certificate for OOD',
     html,
+    idempotencyKey: options.idempotencyKey,
   });
 };
 
 // Leave Rejected Template
-const sendLeaveRejectedEmail = async (facultyEmail, facultyName, leaveRequest, reviewerName) => {
+const sendLeaveRejectedEmail = async (facultyEmail, facultyName, leaveRequest, reviewerName, options = {}) => {
   const startDateStr = new Date(leaveRequest.startDate).toLocaleDateString();
   const endDateStr = new Date(leaveRequest.endDate).toLocaleDateString();
 
@@ -204,11 +259,12 @@ const sendLeaveRejectedEmail = async (facultyEmail, facultyName, leaveRequest, r
     to: facultyEmail,
     subject: 'Rejected: Your Leave Application Status Update',
     html,
+    idempotencyKey: options.idempotencyKey,
   });
 };
 
 // Forgot Password / Password Reset Template
-const sendResetPasswordEmail = async (userEmail, userName, resetUrl) => {
+const sendResetPasswordEmail = async (userEmail, userName, resetUrl, options = {}) => {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
       <h2 style="color: #2563eb; text-align: center;">Password Reset Request</h2>
@@ -226,6 +282,7 @@ const sendResetPasswordEmail = async (userEmail, userName, resetUrl) => {
     to: userEmail,
     subject: 'Password Reset Request - Faculty Leave System',
     html,
+    idempotencyKey: options.idempotencyKey,
   });
 };
 

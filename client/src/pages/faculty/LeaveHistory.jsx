@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import api, { getFileUrl } from '../../services/api';
+import api, { viewProtectedFile } from '../../services/api';
 import { toast } from 'react-toastify';
 import { FileText, Download, AlertCircle, ChevronLeft, ChevronRight, Eye, Upload } from 'lucide-react';
 
@@ -12,6 +12,22 @@ const LeaveHistory = () => {
   const [totalPages, setTotalPages] = useState(1);
   const [uploadingLeaveId, setUploadingLeaveId] = useState(null);
   const [certificateFile, setCertificateFile] = useState(null);
+  const [viewingFileId, setViewingFileId] = useState(null);
+
+  const handleViewFile = async (filePath, fileId) => {
+    if (!filePath) return;
+    // Open blank tab synchronously within user gesture to prevent popup blocking
+    const targetTab = window.open('about:blank', '_blank');
+    setViewingFileId(fileId);
+    try {
+      await viewProtectedFile(filePath, targetTab);
+    } catch (err) {
+      console.error('Failed to open document:', err);
+      toast.error(err.response?.data?.message || 'Failed to open document');
+    } finally {
+      setViewingFileId(null);
+    }
+  };
 
   useEffect(() => {
     const fetchLeaves = async () => {
@@ -236,26 +252,26 @@ const LeaveHistory = () => {
                     </td>
                     <td className="table-td text-right">
                       {leave.documents && (
-                        <a
-                          href={getFileUrl(leave.documents)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex p-1.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-slate-200 dark:hover:bg-gray-600 rounded-lg transition-colors mb-1"
+                        <button
+                          type="button"
+                          onClick={() => handleViewFile(leave.documents, `${leave._id}-doc`)}
+                          disabled={viewingFileId === `${leave._id}-doc`}
+                          className="inline-flex p-1.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-slate-200 dark:hover:bg-gray-600 rounded-lg transition-colors mb-1 disabled:opacity-50"
                           title="View supporting document"
                         >
                           <Eye size={16} />
-                        </a>
+                        </button>
                       )}
                       {leave.certificateDocument && (
-                        <a
-                          href={getFileUrl(leave.certificateDocument)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex p-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 rounded-lg transition-colors ml-1 mb-1"
+                        <button
+                          type="button"
+                          onClick={() => handleViewFile(leave.certificateDocument, `${leave._id}-cert`)}
+                          disabled={viewingFileId === `${leave._id}-cert`}
+                          className="inline-flex p-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 rounded-lg transition-colors ml-1 mb-1 disabled:opacity-50"
                           title="View uploaded certificate"
                         >
                           <FileText size={16} />
-                        </a>
+                        </button>
                       )}
                       
                       {(leave.status === 'temporarily_approved' || leave.status === 'certificate_rejected') && leave.leaveType === 'ood' ? (

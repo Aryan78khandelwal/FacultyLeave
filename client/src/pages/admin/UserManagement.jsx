@@ -88,8 +88,8 @@ const UserManagement = () => {
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
 
-    if (formData.password && formData.password.length < 6) {
-      toast.error('Password must be at least 6 characters');
+    if (!formData.password || formData.password.length < 6) {
+      toast.error('Please provide an initial password (at least 6 characters)');
       return;
     }
 
@@ -481,14 +481,18 @@ const UserManagement = () => {
 
               {createOpen && (
                 <div className="form-group">
-                  <label className="form-label">Password (Optional - Leave blank to auto-generate)</label>
+                  <label className="form-label">Initial Password *</label>
                   <input
                     type="password"
+                    required
                     className="form-input text-sm"
-                    placeholder="Custom password (at least 6 characters)"
+                    placeholder="Set initial password (at least 6 characters)"
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   />
+                  <span className="text-[11px] text-slate-400 mt-1 block">
+                    You will need to manually email or share this password with the faculty member.
+                  </span>
                 </div>
               )}
 

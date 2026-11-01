@@ -87,6 +87,10 @@ const userSchema = new mongoose.Schema(
     passwordChangedAt: Date,
     resetPasswordToken: String,
     resetPasswordExpire: Date,
+    _leaveGuard: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true,

@@ -3,6 +3,7 @@ const LeaveRequest = require('../models/LeaveRequest');
 const User = require('../models/User');
 const Department = require('../models/Department');
 const { sendLeaveAppliedEmail, sendLeaveApprovedEmail, sendLeaveRejectedEmail, sendLeaveTemporarilyApprovedEmail } = require('../services/emailService');
+const { enqueueNotification } = require('../utils/enqueueNotification');
 
 // Helper to calculate leave days minus holidays (Sundays, 1st & 3rd Saturdays)
 const calculateLeaveDays = (start, end) => {
@@ -98,6 +99,7 @@ const applyLeave = async (req, res, next) => {
     }
 
     // Run independent database queries in parallel
+    // pendingLeaves: lean + project only totalDays to avoid hydrating full documents
     const [overlappingRequest, user, pendingLeaves] = await Promise.all([
       LeaveRequest.findOne({
         facultyId,
@@ -110,11 +112,9 @@ const applyLeave = async (req, res, next) => {
         ],
       }),
       User.findById(facultyId),
-      LeaveRequest.find({
-        facultyId,
-        leaveType,
-        status: 'pending',
-      })
+      LeaveRequest.find({ facultyId, leaveType, status: 'pending' })
+        .select('totalDays')
+        .lean(),
     ]);
 
     if (overlappingRequest) {
@@ -173,38 +173,93 @@ const applyLeave = async (req, res, next) => {
       documentPath = `/uploads/${req.file.filename}`;
     }
 
-    const leaveRequest = await LeaveRequest.create({
-      facultyId,
-      leaveType,
-      startDate,
-      endDate,
-      totalDays,
-      calendarDays,
-      excludedDates,
-      reason,
-      documents: documentPath,
-      isPaidLeave,
-      duration,
-      halfDayType: duration === 'HALF_DAY' ? halfDayType : null,
-    });
-
-    // Notify Department HOD
+    // Look up HOD before the transaction so notification payload is ready
+    let hodInfo = null;
     if (user.department) {
       const dept = await Department.findById(user.department).populate('hod', 'name email');
       if (dept && dept.hod) {
-        try {
-          await sendLeaveAppliedEmail(
-            dept.hod.email,
-            dept.hod.name,
-            user.name,
-            leaveRequest
-          );
-        } catch (err) {
-          console.error('Notification email failed:', err.message);
-        }
+        hodInfo = { email: dept.hod.email, name: dept.hod.name };
       }
     }
 
+    // Wrap overlap re-check + insert + outbox in a single transaction.
+    // The guard write on the User document forces a write-write conflict if two
+    // concurrent transactions try to create overlapping leaves for the same faculty.
+    const session = await mongoose.startSession();
+    let leaveRequest;
+    try {
+      await session.withTransaction(async () => {
+        // Re-check overlap inside the transaction with a conditional insert guard
+        const concurrent = await LeaveRequest.findOne({
+          facultyId,
+          status: { $in: ['pending', 'approved'] },
+          startDate: { $lte: new Date(endDate) },
+          endDate: { $gte: new Date(startDate) },
+        }).session(session);
+
+        if (concurrent) {
+          const startStr = new Date(concurrent.startDate).toLocaleDateString();
+          const endStr   = new Date(concurrent.endDate).toLocaleDateString();
+          throw Object.assign(
+            new Error(`You already have a ${concurrent.status} leave request overlapping this duration (${startStr} to ${endStr}).`),
+            { _overlap: true }
+          );
+        }
+
+        // Guard write: increment the User counter inside the transaction to force
+        // an unconditional write-write conflict under MongoDB snapshot isolation,
+        // closing the race window where two simultaneous submissions both pass overlap check.
+        await User.updateOne(
+          { _id: facultyId },
+          { $inc: { _leaveGuard: 1 } },
+          { session }
+        );
+
+        const [created] = await LeaveRequest.create(
+          [{
+            facultyId,
+            leaveType,
+            startDate,
+            endDate,
+            totalDays,
+            calendarDays,
+            excludedDates,
+            reason,
+            documents: documentPath,
+            isPaidLeave,
+            duration,
+            halfDayType: duration === 'HALF_DAY' ? halfDayType : null,
+          }],
+          { session }
+        );
+        leaveRequest = created;
+
+        // Enqueue HOD notification inside the transaction — rolls back if transaction aborts
+        if (hodInfo) {
+          await enqueueNotification('leave-applied', {
+            hodEmail: hodInfo.email,
+            hodName: hodInfo.name,
+            facultyName: user.name,
+            leaveRequest: {
+              startDate: created.startDate,
+              endDate: created.endDate,
+              totalDays: created.totalDays,
+              leaveType: created.leaveType,
+              reason: created.reason,
+            },
+          }, { session });
+        }
+      });
+    } catch (txErr) {
+      await session.endSession();
+      if (txErr._overlap) {
+        return res.status(400).json({ success: false, message: txErr.message });
+      }
+      throw txErr;
+    }
+    await session.endSession();
+
+    // Respond after transaction commit — outbox write is durable
     res.status(201).json({
       success: true,
       message: 'Leave application submitted successfully',
@@ -270,8 +325,10 @@ const getLeaves = async (req, res, next) => {
     const leavesQuery = LeaveRequest.find(query)
       .populate({
         path: 'facultyId',
-        select: 'name email employeeId designation department',
-        populate: { path: 'department', select: 'name' }
+        // Select only what consumers (HOD review table, Leave History) actually render.
+        // Nested department is NOT needed in list views — omit the sub-populate to
+        // avoid the extra round-trip; it is still present in getLeaveById for detail views.
+        select: 'name email employeeId designation',
       })
       .populate('approvedBy', 'name role')
       .skip(skipIndex)
@@ -361,7 +418,6 @@ const reviewLeave = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'HODs cannot reject a leave that has already been approved.' });
     }
 
-
     // Verify HOD authority over faculty using department membership query —
     // this covers all roles (Faculty, Instructor, SDA) uniformly, even if
     // the user's department field is not set (relies on facultyList instead).
@@ -378,7 +434,6 @@ const reviewLeave = async (req, res, next) => {
         return res.status(403).json({ success: false, message: 'Not authorized to review leaves outside your department' });
       }
     }
-
 
     // Fetch the faculty document once to be used for balance checks and updates
     let facultyDoc;
@@ -401,25 +456,57 @@ const reviewLeave = async (req, res, next) => {
       }
     }
 
-    // Process Temporarily Approved (OOD ONLY)
+    // ─── Process Temporarily Approved (OOD ONLY) ───────────────────────────
     if (status === 'temporarily_approved') {
       if (leave.leaveType !== 'ood') {
         return res.status(400).json({ success: false, message: 'Only OOD leaves can be temporarily approved' });
       }
+
+      // Wrap status transition + outbox in a transaction for atomicity
+      const tempSession = await mongoose.startSession();
+      try {
+        await tempSession.withTransaction(async () => {
+          const transitioned = await LeaveRequest.updateOne(
+            { _id: leave._id, status: { $in: ['pending', 'certificate_submitted'] } },
+            { $set: { status: 'temporarily_approved', approvedBy: req.user._id } },
+            { session: tempSession }
+          );
+          if (transitioned.modifiedCount !== 1) {
+            throw Object.assign(new Error('Already reviewed'), { _alreadyReviewed: true });
+          }
+
+          // Enqueue notification inside the transaction
+          await enqueueNotification('leave-temporarily-approved', {
+            facultyEmail: leave.facultyId.email,
+            facultyName: leave.facultyId.name,
+            leaveRequest: {
+              startDate: leave.startDate,
+              endDate: leave.endDate,
+              totalDays: leave.totalDays,
+              leaveType: leave.leaveType,
+            },
+            reviewerName: req.user.name,
+          }, { session: tempSession });
+        });
+      } catch (txErr) {
+        await tempSession.endSession();
+        if (txErr._alreadyReviewed) {
+          return res.status(409).json({ success: false, message: 'Leave was already reviewed by someone else. Please refresh.' });
+        }
+        throw txErr;
+      }
+      await tempSession.endSession();
+
+      // Return updated in-memory leave without an extra database reread
       leave.status = 'temporarily_approved';
       leave.approvedBy = req.user._id;
-      await leave.save();
 
-      // Send Email
-      try {
-        await sendLeaveTemporarilyApprovedEmail(leave.facultyId.email, leave.facultyId.name, leave, req.user.name);
-      } catch (err) {
-        console.error('Temporarily approved email error:', err.message);
-      }
+      return res.status(200).json({ success: true, message: `Leave request status updated to ${status}`, leave });
     }
-    // Process Approval
+
+    // ─── Process Approval ───────────────────────────────────────────────────
+    // Uses a MongoDB transaction so balance deduction, status change, and notification are atomic.
     else if (status === 'approved') {
-      // Double check balance just in case
       if (facultyDoc.leaveBalance[leave.leaveType] < leave.totalDays && leave.leaveType !== 'casual') {
         return res.status(400).json({
           success: false,
@@ -427,52 +514,134 @@ const reviewLeave = async (req, res, next) => {
         });
       }
 
-      // Deduct balance
-      facultyDoc.leaveBalance[leave.leaveType] -= leave.totalDays;
-      await facultyDoc.save();
+      const session = await mongoose.startSession();
+      try {
+        await session.withTransaction(async () => {
+          // Atomically transition only from an allowed prior status
+          const transitioned = await LeaveRequest.updateOne(
+            { _id: leave._id, status: { $in: ['pending', 'certificate_submitted'] } },
+            { $set: { status: 'approved', approvedBy: req.user._id } },
+            { session }
+          );
+          if (transitioned.modifiedCount !== 1) {
+            throw Object.assign(new Error('Already reviewed'), { _alreadyReviewed: true });
+          }
 
+          // Atomically deduct balance only if sufficient (casual bypasses the $gte check)
+          const balanceFilter = leave.leaveType === 'casual'
+            ? { _id: facultyDoc._id }
+            : { _id: facultyDoc._id, [`leaveBalance.${leave.leaveType}`]: { $gte: leave.totalDays } };
+
+          const balanceUpdate = await User.updateOne(
+            balanceFilter,
+            { $inc: { [`leaveBalance.${leave.leaveType}`]: -leave.totalDays } },
+            { session }
+          );
+          if (balanceUpdate.modifiedCount !== 1 && leave.leaveType !== 'casual') {
+            throw Object.assign(new Error('Insufficient balance'), { _insufficientBalance: true });
+          }
+
+          // Enqueue notification inside the transaction — uses already-loaded values
+          await enqueueNotification('leave-approved', {
+            facultyEmail: leave.facultyId.email,
+            facultyName: leave.facultyId.name,
+            leaveRequest: {
+              startDate: leave.startDate,
+              endDate: leave.endDate,
+              totalDays: leave.totalDays,
+              leaveType: leave.leaveType,
+            },
+            reviewerName: req.user.name,
+          }, { session });
+        });
+      } catch (txErr) {
+        await session.endSession();
+        if (txErr._alreadyReviewed) {
+          return res.status(409).json({ success: false, message: 'Leave was already reviewed by someone else. Please refresh.' });
+        }
+        if (txErr._insufficientBalance) {
+          return res.status(400).json({ success: false, message: 'Cannot approve. Insufficient leave balance (concurrent update detected).' });
+        }
+        throw txErr;
+      }
+      await session.endSession();
+
+      // Return updated in-memory leave without an extra database reread
       leave.status = 'approved';
       leave.approvedBy = req.user._id;
-      await leave.save();
 
-      // Send Email
-      try {
-        await sendLeaveApprovedEmail(facultyDoc.email, facultyDoc.name, leave, req.user.name);
-      } catch (err) {
-        console.error('Approved email error:', err.message);
-      }
-    } 
-    // Process Rejection
+      return res.status(200).json({ success: true, message: `Leave request status updated to ${status}`, leave });
+    }
+
+    // ─── Process Rejection ──────────────────────────────────────────────────
+    // Uses a MongoDB transaction when rolling back a previously approved leave balance and enqueueing outbox.
     else if (status === 'rejected' || status === 'certificate_rejected') {
       if (!rejectionReason) {
         return res.status(400).json({ success: false, message: 'Please provide a rejection reason' });
       }
 
-      // Rollback balance if leave was already approved (balance was previously deducted)
-      // This covers the case where an approved leave is being certificate_rejected
-      // or any future scenario where an approved leave is reverted.
-      if (leave.status === 'approved') {
-        facultyDoc.leaveBalance[leave.leaveType] += leave.totalDays;
-        facultyDoc.markModified('leaveBalance');
-        await facultyDoc.save();
-      }
+      const session = await mongoose.startSession();
+      try {
+        await session.withTransaction(async () => {
+          // Read the current status inside the transaction to prevent stale reads.
+          // A concurrent approval could change the status between the outer read
+          // and this transaction, so we must check the live value here.
+          const currentLeave = await LeaveRequest.findOne({ _id: leave._id }).session(session);
+          const wasApproved = currentLeave && currentLeave.status === 'approved';
 
+          // Atomically transition only from an allowed prior status
+          const transitioned = await LeaveRequest.updateOne(
+            { _id: leave._id, status: { $in: ['pending', 'certificate_submitted', 'approved'] } },
+            { $set: { status, rejectionReason, approvedBy: req.user._id } },
+            { session }
+          );
+          if (transitioned.modifiedCount !== 1) {
+            throw Object.assign(new Error('Already reviewed'), { _alreadyReviewed: true });
+          }
+
+          // Rollback balance only if leave was actually approved (balance was deducted)
+          if (wasApproved) {
+            await User.updateOne(
+              { _id: facultyDoc._id },
+              { $inc: { [`leaveBalance.${leave.leaveType}`]: leave.totalDays } },
+              { session }
+            );
+          }
+
+          // Enqueue notification inside the transaction
+          await enqueueNotification('leave-rejected', {
+            facultyEmail: leave.facultyId.email,
+            facultyName: leave.facultyId.name,
+            leaveRequest: {
+              startDate: leave.startDate,
+              endDate: leave.endDate,
+              totalDays: leave.totalDays,
+              leaveType: leave.leaveType,
+              rejectionReason,
+            },
+            reviewerName: req.user.name,
+          }, { session });
+        });
+      } catch (txErr) {
+        await session.endSession();
+        if (txErr._alreadyReviewed) {
+          return res.status(409).json({ success: false, message: 'Leave was already reviewed by someone else. Please refresh.' });
+        }
+        throw txErr;
+      }
+      await session.endSession();
+
+      // Return updated in-memory leave without an extra database reread
       leave.status = status;
       leave.rejectionReason = rejectionReason;
       leave.approvedBy = req.user._id;
-      await leave.save();
 
-      // Send Email
-      try {
-        await sendLeaveRejectedEmail(leave.facultyId.email, leave.facultyId.name, leave, req.user.name);
-      } catch (err) {
-        console.error('Rejected email error:', err.message);
-      }
-    } else {
-      return res.status(400).json({ success: false, message: "Invalid status update requested" });
+      return res.status(200).json({ success: true, message: `Leave request status updated to ${status}`, leave });
     }
 
-    res.status(200).json({ success: true, message: `Leave request status updated to ${status}`, leave });
+    else {
+      return res.status(400).json({ success: false, message: 'Invalid status update requested' });
+    }
   } catch (error) {
     next(error);
   }

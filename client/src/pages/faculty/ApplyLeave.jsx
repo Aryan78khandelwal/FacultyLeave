@@ -244,7 +244,6 @@ const ApplyLeave = () => {
 
       if (response.data.success) {
         toast.success('Leave application submitted successfully!');
-        await refreshUser(); // Update balance in Auth Context
         navigate('/faculty/history');
       }
     } catch (error) {

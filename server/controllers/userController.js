@@ -1,21 +1,12 @@
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const Department = require('../models/Department');
 const LeaveRequest = require('../models/LeaveRequest');
-const { sendAccountCreatedEmail } = require('../services/emailService');
+const { enqueueNotification } = require('../utils/enqueueNotification');
 
 // Safe number parsers — prevent NaN from empty strings crashing Mongoose
 const safeInt = (val, fallback) => { const n = parseInt(val); return isNaN(n) ? fallback : n; };
 const safeFloat = (val, fallback) => { const n = parseFloat(val); return isNaN(n) ? fallback : n; };
-
-// Generate random password helper
-const generateRandomPassword = (length = 8) => {
-  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$';
-  let password = '';
-  for (let i = 0; i < length; i++) {
-    password += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return password;
-};
 
 // @desc    Get all users with filtering, sorting, pagination(it is a technique used to divide a large amount of data into smaller pages instead of sending everything at once.)
 // @route   GET /api/users
@@ -92,22 +83,30 @@ const createUser = async (req, res, next) => {
   try {
     const { name, email, role, employeeId, designation, department, leaveBalance } = req.body;
 
-    // Check if email or employeeId already exists
-    const emailExists = await User.findOne({ email });
+    // Run both duplicate checks concurrently — they are independent reads
+    const [emailExists, empIdExists] = await Promise.all([
+      User.findOne({ email }).lean(),
+      User.findOne({
+        employeeId,
+        department: role === 'Admin' ? null : (department || null),
+      }).lean(),
+    ]);
+
     if (emailExists) {
       return res.status(400).json({ success: false, message: 'Email is already registered' });
     }
-
-    const empIdExists = await User.findOne({
-      employeeId,
-      department: role === 'Admin' ? null : (department || null),
-    });
     if (empIdExists) {
       return res.status(400).json({ success: false, message: 'Employee ID is already registered in this department' });
     }
 
-    // Generate or use custom password
-    const rawPassword = req.body.password || generateRandomPassword();
+    // Initial password set by Admin
+    const rawPassword = req.body.password;
+    if (!rawPassword || typeof rawPassword !== 'string' || rawPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide an initial password with at least 6 characters',
+      });
+    }
 
     // Create User object
     const userData = {
@@ -157,39 +156,67 @@ const createUser = async (req, res, next) => {
       userData.oodLeaveEnabled = Boolean(req.body.oodLeaveEnabled);
     }
 
-    const user = await User.create(userData);
+    // Wrap user creation + department updates + outbox in a single transaction
+    const session = await mongoose.startSession();
+    let user;
+    try {
+      await session.withTransaction(async () => {
+        const [created] = await User.create([userData], { session });
+        user = created;
 
-    // Update Department relationships if department exists and not admin
-    if (userData.department) {
-      const dept = await Department.findById(userData.department);
-      if (dept) {
-        // Add to faculty list
-        dept.facultyList.addToSet(user._id);
+        // Update Department relationships if department exists and not admin.
+        if (userData.department) {
+          const dept = await Department.findById(userData.department).session(session);
+          if (dept) {
+            // Add to faculty list
+            dept.facultyList.addToSet(user._id);
 
-        // If the new user is an HOD, assign them as HOD of the department
-        if (role === 'HOD') {
-          // If department already has HOD, demote old HOD's role to Faculty
-          if (dept.hod && dept.hod.toString() !== user._id.toString()) {
-            await User.findByIdAndUpdate(dept.hod, { role: 'Faculty' });
+            // If the new user is an HOD, assign them as HOD of the department
+            if (role === 'HOD') {
+              // If department already has HOD, demote old HOD's role to Faculty
+              if (dept.hod && dept.hod.toString() !== user._id.toString()) {
+                await User.findByIdAndUpdate(dept.hod, { role: 'Faculty' }, { session });
+              }
+              dept.hod = user._id;
+            }
+
+            await dept.save({ session });
           }
-          dept.hod = user._id;
         }
 
-        await dept.save();
-      }
-    }
-
-    // Send email notification
-    try {
-      await sendAccountCreatedEmail(user, rawPassword);
+        // Enqueue welcome email inside the transaction (non-sensitive account details only, no password)
+        await enqueueNotification('account-created', {
+          user: {
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            employeeId: user.employeeId,
+          },
+        }, { session });
+      });
     } catch (err) {
-      console.error('Welcome email error:', err.message);
+      await session.endSession();
+      // Handle concurrent duplicate-key race that slips past the pre-checks
+      if (err.code === 11000) {
+        const field = err.keyPattern && Object.keys(err.keyPattern)[0];
+        const msg = field === 'email'
+          ? 'Email is already registered'
+          : 'Employee ID is already registered in this department';
+        return res.status(400).json({ success: false, message: msg });
+      }
+      throw err;
     }
+    await session.endSession();
 
+    // Strip password from API response
+    const safeUser = user.toObject ? user.toObject() : { ...user };
+    delete safeUser.password;
+
+    // Respond after transaction commit — outbox write is durable
     res.status(201).json({
       success: true,
-      message: 'User created successfully. Login credentials have been emailed to the user.',
-      user,
+      message: 'User created successfully.',
+      user: safeUser,
     });
   } catch (error) {
     next(error);

@@ -17,6 +17,8 @@ if (!process.env.JWT_SECRET) {
 
 const connectDB = require('./config/db');
 const errorHandler = require('./middleware/errorMiddleware');
+const { startWorker } = require('./services/notificationWorker');
+const { bootstrapAdmin } = require('./services/bootstrapService');
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
@@ -24,21 +26,13 @@ const userRoutes = require('./routes/userRoutes');
 const departmentRoutes = require('./routes/departmentRoutes');
 const leaveRoutes = require('./routes/leaveRoutes');
 const fileRoutes = require('./routes/fileRoutes');
-
-// Import models for seeding
-const User = require('./models/User');
+const notificationRoutes = require('./routes/notificationRoutes');
 
 const app = express();
 
 // Trust first proxy (required for Railway, Render, Heroku, etc.)
 // Ensures express-rate-limit reads the real client IP from X-Forwarded-For
 app.set('trust proxy', 1);
-
-// Connect to Database
-connectDB().then(() => {
-  // Seed initial Admin if database is empty
-  seedAdmin();
-});
 
 // Security HTTP headers
 app.use(helmet());
@@ -85,6 +79,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/leaves', leaveRoutes);
 app.use('/api/files', fileRoutes); // Authenticated file serving (replaces public /uploads route)
+app.use('/api/notifications', notificationRoutes); // Monitored outbox queue & operator replay
 
 // Base route for health check
 app.get('/', (req, res) => {
@@ -94,35 +89,23 @@ app.get('/', (req, res) => {
 // Centralized error handler middleware
 app.use(errorHandler);
 
-// Seeding function for Default Admin
-async function seedAdmin() {
+// Start server after DB connection and Admin bootstrap succeed
+const startServer = async () => {
   try {
-    const adminCount = await User.countDocuments({ role: 'Admin' });
-    if (adminCount === 0) {
-      console.log('Seeding default administrator...');
-      await User.create({
-        name: 'System Administrator',
-        email: 'admin@college.edu',
-        password: 'AdminPassword123', // Will be hashed automatically by userSchema pre-save hook
-        employeeId: 'EMP-ADMIN-001',
-        designation: 'System Administrator',
-        role: 'Admin',
-        leaveBalance: {
-          casual: 12,
-          restricted: 10,
-          earned: 15,
-        },
-      });
-      console.log('Default administrator created successfully.');
-      console.log('Email: admin@college.edu');
-      console.log('Password: AdminPassword123');
-    }
-  } catch (err) {
-    console.error('Failed to seed default administrator:', err.message);
-  }
-}
+    await connectDB();
+    await bootstrapAdmin();
+    startWorker();
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
-});
+    const PORT = process.env.PORT || 5000;
+    app.listen(PORT, () => {
+      console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+    });
+  } catch (err) {
+    console.error('Fatal startup error:', err.message);
+    process.exit(1);
+  }
+};
+
+startServer();
+
+module.exports = app;

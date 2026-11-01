@@ -1,7 +1,9 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 const User = require('../models/User');
-const { sendResetPasswordEmail } = require('../services/emailService');
+const { enqueueNotification } = require('../utils/enqueueNotification');
+const { encryptSensitive } = require('../utils/cryptoHelper');
 const { addToBlocklist } = require('../utils/tokenBlocklist');
 
 // Generate JWT token helper
@@ -86,22 +88,27 @@ const forgotPassword = async (req, res, next) => {
     // Set expire: 10 minutes
     user.resetPasswordExpire = Date.now() + 10 * 60 * 1000;
 
-    await user.save({ validateBeforeSave: false });
-
-    // Create reset URL
-    const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password/${resetToken}`;
-
+    // Wrap token save + outbox insert in a transaction for atomicity
+    const session = await mongoose.startSession();
     try {
-      await sendResetPasswordEmail(user.email, user.name, resetUrl);
-      res.status(200).json({ success: true, message: 'Email sent successfully' });
-    } catch (err) {
-      console.error(err);
-      user.resetPasswordToken = undefined;
-      user.resetPasswordExpire = undefined;
-      await user.save({ validateBeforeSave: false });
+      await session.withTransaction(async () => {
+        await user.save({ validateBeforeSave: false, session });
 
-      return res.status(500).json({ success: false, message: 'Email could not be sent' });
+        await enqueueNotification('password-reset', {
+          userId: user._id,
+          userEmail: user.email,
+          userName: user.name,
+          encryptedResetToken: encryptSensitive(resetToken),
+          expiresAt: user.resetPasswordExpire,
+        }, { session });
+      });
+    } catch (txErr) {
+      await session.endSession();
+      throw txErr;
     }
+    await session.endSession();
+
+    res.status(200).json({ success: true, message: 'Email sent successfully' });
   } catch (error) {
     next(error);
   }
